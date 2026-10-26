@@ -79,7 +79,7 @@ docker compose logs --tail=50 airflow-init airflow-scheduler
 | Metabase | http://localhost:3334 | первичная регистрация при первом открытии |
 | PostgreSQL с ноутбука | localhost:15433 | БД earthquakes, пользователь lab, пароль lab_password |
 
-Порты специально отличаются от примера weather-pipeline. Изменить можно в `.env`.
+Порты сервисов можно изменить в `.env`.
 В контейнерах хост хранилища — `warehouse`, порт — `5432`.
 Пароли учебные, сервисы открыты только на localhost. `.env` в Git не загружается.
 Смену пароля БД после создания тома нужно делать в самой БД, а не только в `.env`.
