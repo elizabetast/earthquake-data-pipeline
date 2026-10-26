@@ -1,0 +1,4 @@
+-- Роль 2: DDL и загрузка STG -> DDS с SCD2.
+-- Контракт: docs/contracts.md. Выполняется целиком в одной транзакции.
+-- Обрабатывайте stg.earthquake_raw по id (с собственным watermark).
+-- До реализации задача Airflow будет SKIPPED.
