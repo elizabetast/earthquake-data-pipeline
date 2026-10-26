@@ -3,6 +3,7 @@ import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.error import HTTPError
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'dags'))
@@ -39,6 +40,25 @@ class ApiTests(unittest.TestCase):
             url, value, fetched = api.request({'format': 'geojson'})
         self.assertEqual(value['features'], [])
         self.assertEqual(value['_http_status'], 204)
+
+    def test_transient_http_error_is_retried(self):
+        response = MagicMock()
+        response.status = 204
+        response.__enter__.return_value = response
+        error = HTTPError('url', 503, 'Unavailable', None, None)
+        with patch.object(api, 'urlopen', side_effect=[error, response]) as fetch, \
+             patch.object(api.time, 'sleep') as sleep:
+            api.request({'format': 'geojson'})
+        self.assertEqual(fetch.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_http_400_fails_without_retry(self):
+        error = HTTPError('url', 400, 'Invalid parameters', None, None)
+        with patch.object(api, 'urlopen', side_effect=error) as fetch, \
+             patch.object(api.time, 'sleep') as sleep, self.assertRaises(HTTPError):
+            api.request({'format': 'geojson'})
+        self.assertEqual(fetch.call_count, 1)
+        sleep.assert_not_called()
 
     def test_overflow_splits_without_losing_boundary(self):
         requests = []
