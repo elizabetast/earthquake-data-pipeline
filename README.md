@@ -18,7 +18,7 @@ Airflow и Docker Compose — роль 1
 |---|---|---|---|
 | Роль 1 | Окружение, оркестрация, сбор и STG; документация передачи | compose.yaml, dags/, sql/init/, тесты сборщика, README и контракт | Реализовано |
 | Роль 2 | Проектирование DDS, STG → DDS, SCD2, идемпотентность и проверки | sql/dds_load.sql, docs/dds.md, scripts/check_dds.py | Готово |
-| Роль 3 | Проектирование CDM, DDS → CDM, метрики и Metabase | sql/cdm_load.sql, docs/dashboard.md, SQL карточек и скриншоты | Предстоит |
+| Роль 3 | Проектирование CDM, DDS → CDM, метрики и Metabase | sql/cdm_load.sql, docs/dashboard.md, scripts/check_cdm.py, SQL карточек и скриншоты | Витрины готовы, дашборд в работе |
 
 Каждый участник документирует и проверяет свой этап. Точную равную трудоемкость
 заранее гарантировать нельзя; объем сбалансирован самостоятельным моделированием,
@@ -61,6 +61,21 @@ Airflow и Docker Compose — роль 1
 «Проверки и обслуживание»). CDM и дашборды делает участник 3.
 
 Состояние фактических проверок записано в [docs/validation.md](docs/validation.md).
+
+## Что сделано ролью 3
+
+Витрины CDM описаны в [docs/dashboard.md](docs/dashboard.md), код — `sql/cdm_load.sql`,
+план и сценарий защиты — [docs/role3_plan.md](docs/role3_plan.md). Семь таблиц строятся
+только из DDS и пересобираются целиком в одной транзакции:
+
+- `event_map` — карта текущих землетрясений; `daily_activity` — активность и полнота по дням;
+- `review_summary` — доля reviewed по сетям и возрасту события;
+- `revision_summary` — первая и текущая версия события: как USGS уточнил магнитуду, статус, глубину;
+- `review_dynamics` — time travel по SCD2: состояние каталога на каждый час наблюдения;
+- `pipeline_health`, `data_quality` — запуски конвейера, отбраковка и полнота полей.
+
+Счётчики и карта считаются по `is_current`, история версий — в уточнениях и динамике.
+Проверки — `scripts/check_cdm.py` (команда в разделе «Проверки и обслуживание»).
 
 ## Быстрый старт
 
@@ -201,6 +216,13 @@ docker compose config --quiet
 
 ```bash
 docker compose exec -T airflow-scheduler python < scripts/check_dds.py
+```
+
+Проверка CDM — так же во временной базе: витрины только из DDS, сходимость чисел,
+повторный запуск, time travel, откат при ошибке и доступ `bi_reader` только к CDM:
+
+```bash
+docker compose exec -T airflow-scheduler python < scripts/check_cdm.py
 ```
 
 Проверка DAG в настоящем окружении:

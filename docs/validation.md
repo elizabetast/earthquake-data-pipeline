@@ -50,3 +50,24 @@ CDM ещё не реализован: задача dds_to_cdm ожидаемо s
 ```bash
 docker compose exec -T airflow-scheduler python < scripts/check_storage.py
 ```
+
+## Проверка роли 3
+
+Дата: 28 октября 2026. Чистое окружение (`docker compose up -d` с пустыми томами).
+
+- `scripts/check_cdm.py`: 25 проверок прошли — CDM не обращается к STG; пустой DDS; в карте
+  только текущие землетрясения; NULL-магнитуда и глубина в категории «нет данных»; суммы
+  CDM сходятся с DDS; среднее без NULL; повторный запуск без изменений; уточнение не задваивает
+  событие; первая и текущая версия в `revision_summary`; знаменатель доли reviewed; time travel
+  по часовым срезам; откат при ошибке; `bi_reader` читает CDM и не видит STG/DDS.
+- `scripts/check_dds.py` после изменений роли 3: все проверки прошли.
+- Запуск `manual__role3_first_run` на живом USGS: `collect_to_stg`, `stg_to_dds`, `dds_to_cdm` — success.
+  33 641 строка STG → 32 869 текущих землетрясений в DDS (прочие типы: 449 quarry blast,
+  235 explosion, 58 ice quake и др.).
+- Сверка: `event_map`, `daily_activity`, `review_summary`, `revision_summary` — по 32 869 событий,
+  совпадает с `dds.event_versions WHERE is_current AND event_type='earthquake'`.
+- Доля reviewed 87,7 %, максимальная магнитуда 7,8, средняя 1,76; одно событие без магнитуды.
+- Полная пересборка `cdm_load.sql` — около 2 с.
+
+`review_dynamics` после первого запуска содержит один срез; срезы добавляются каждый час,
+пока работает DAG. Metabase-дашборд и скриншоты — следующий шаг.
