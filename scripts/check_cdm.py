@@ -127,7 +127,7 @@ def check(name, cond, detail=''):
 
 
 CDM_TABLES = {'event_map', 'daily_activity', 'review_summary', 'revision_summary',
-              'review_dynamics', 'pipeline_health', 'data_quality'}
+              'event_history', 'review_dynamics', 'pipeline_health', 'data_quality'}
 
 try:
     conn = connect()
@@ -144,7 +144,7 @@ try:
     pipeline()
     tables = {r[0] for r in q("SELECT table_name FROM information_schema.tables "
                               "WHERE table_schema='cdm'")}
-    check('созданы все 7 витрин', tables == CDM_TABLES, tables)
+    check('созданы все 8 витрин', tables == CDM_TABLES, tables)
     check('пустой DDS → пустые витрины',
           all(scalar(f'SELECT count(*) FROM cdm.{t}') == 0 for t in CDM_TABLES - {'pipeline_health'}))
 
@@ -208,6 +208,15 @@ try:
           rev == [(2, True, 5.1, 5.3, 0.2, True, -2.0, 11.12, 1.0)], rev)
     check('неуточнённое событие', q("""SELECT is_revised, magnitude_delta::float, hours_to_review
           FROM cdm.revision_summary WHERE event_id='ev_a'""") == [(False, 0.0, None)])
+    hist = q("""SELECT version_no, magnitude::float, magnitude_change::float, status_change, is_current
+                FROM cdm.event_history WHERE event_id='ev_b' ORDER BY version_no""")
+    check('event_history: цепочка версий с изменениями',
+          hist == [(1, 5.1, None, None, False), (2, 5.3, 0.2, 'automatic → reviewed', True)], hist)
+    check('event_history: все текущие землетрясения, версий столько же, сколько в DDS',
+          scalar('SELECT count(DISTINCT event_id) FROM cdm.event_history')
+          == scalar('SELECT count(*) FROM cdm.event_map')
+          and scalar('SELECT count(*) FROM cdm.event_history') == scalar(
+              "SELECT count(*) FROM dds.event_versions v JOIN cdm.event_map m USING (event_id)"))
 
     # --- 5. Доли reviewed.
     share = q("""SELECT sum(reviewed_cnt), sum(events_cnt) FROM cdm.review_summary""")

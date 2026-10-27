@@ -12,6 +12,7 @@ flowchart LR
     EV -->|is_current| DA[daily_activity]
     EV -->|is_current| RS[review_summary]
     EV -->|первая vs текущая| RV[revision_summary]
+    EV -->|все версии| EH[event_history]
     EV -->|valid_from ≤ t < valid_to| DY[review_dynamics]
     E[dds.events] --> MAP
     LL[dds.load_log] --> PH[pipeline_health]
@@ -25,6 +26,7 @@ flowchart LR
 | `daily_activity` | дата UTC × сеть × `mag_bin` × класс глубины | `events_cnt, reviewed_cnt, mag_filled_cnt, place_filled_cnt, revised_cnt, sum_mag, max_mag, sum_depth_km, max_depth_km` | is_current |
 | `review_summary` | сеть × возраст события (сутки) × класс магнитуды | `events_cnt, reviewed_cnt, reviewed_share, data_as_of` | is_current |
 | `revision_summary` | текущее землетрясение | `versions_cnt, first/current_magnitude, magnitude_delta, status_changed, depth_delta_km, location_shift_km, hours_to_review` | все версии |
+| `event_history` | версия текущего землетрясения | `version_no, valid_from, valid_to, is_current, magnitude, magnitude_change, review_status, status_change` | все версии |
 | `review_dynamics` | час наблюдения × сеть × класс магнитуды | `events_cnt, reviewed_cnt, automatic_cnt, mag_filled_cnt` | все версии, time travel |
 | `pipeline_health` | запуск STG → DDS | `run_kind, rows_read, rows_rejected, rows_stale, new_events, versions_inserted, versions_closed` | `load_log` |
 | `data_quality` | проверка | `check_group, check_name, records_cnt, total_cnt, share` | `rejected_observations`, `event_versions` |
@@ -52,184 +54,73 @@ flowchart LR
 поэтому карточки Metabase не теряют поля. Если меняется структура витрины, при разработке
 выполнить `DROP TABLE cdm.<имя>` вручную и перезапустить задачу.
 
-## Подключение Metabase
+## Metabase: сборка одной командой
 
-1. Открыть http://localhost:3334, зарегистрировать администратора (локально, любые данные).
-2. Admin → Databases → Add database → PostgreSQL:
-   host `warehouse`, port `5432`, database `earthquakes`, user `bi_reader`,
-   password `bi_reader`, SSL выключен. Имя — `Earthquakes CDM`.
-3. После первого успешного `dds_to_cdm`: Admin → Databases → Sync database schema now.
-   Видна только схема `cdm` — это и есть проверка прав.
-4. Admin → Table Metadata → `event_map`: `latitude` → Latitude, `longitude` → Longitude,
-   `magnitude` → Score (по желанию), `place` → Category off. Без этого карта не строится.
+Дашборды собираются скриптом [scripts/setup_metabase.py](../scripts/setup_metabase.py) через API
+Metabase — руками ничего настраивать не нужно, а настройки воспроизводимы на любом ноутбуке.
+Нужен только Python 3 (без сторонних библиотек), окружение поднято и `dds_to_cdm` хотя бы раз успешен:
 
-## Карточки дашборда «Сейсмическая активность USGS»
-
-Все карточки — SQL-вопросы (New → SQL query). Фильтры дашборда задаются переменными
-типа **Field Filter**: `{{date}}` → поле даты, `{{mag}}` → поле магнитуды/корзины,
-`{{net}}` → `network_code`, `{{depth}}` → `depth_class`. На дашборде: фильтр «Дата» (Date
-range), «Магнитуда от» (Number ≥), «Сеть» и «Глубина» (Text) — подключить к каждой карточке.
-
-### KPI (тип Number)
-
-```sql
--- K1 Событий
-SELECT sum(events_cnt) AS "Событий" FROM cdm.daily_activity
-WHERE 1=1 [[AND {{date}}]] [[AND {{mag}}]] [[AND {{net}}]] [[AND {{depth}}]];
-
--- K2 Максимальная магнитуда
-SELECT max(max_mag) AS "Макс. M" FROM cdm.daily_activity
-WHERE 1=1 [[AND {{date}}]] [[AND {{mag}}]] [[AND {{net}}]] [[AND {{depth}}]];
-
--- K3 Доля reviewed (формат: проценты)
-SELECT sum(reviewed_cnt)::numeric / NULLIF(sum(events_cnt), 0) AS "Доля reviewed"
-FROM cdm.daily_activity
-WHERE 1=1 [[AND {{date}}]] [[AND {{mag}}]] [[AND {{net}}]] [[AND {{depth}}]];
-
--- K4 Уточнено событий за время наблюдения
-SELECT sum(revised_cnt) AS "Уточнено" FROM cdm.daily_activity
-WHERE 1=1 [[AND {{date}}]] [[AND {{mag}}]] [[AND {{net}}]] [[AND {{depth}}]];
-
--- K5 Последняя загрузка
-SELECT max(started_at) AS "Последняя загрузка" FROM cdm.pipeline_health;
+```bash
+python scripts/setup_metabase.py
 ```
 
-Для `daily_activity`: `{{date}}` → `event_date`, `{{mag}}` → `mag_bin`.
+Скрипт:
 
-### 1. Карта землетрясений (Map → Pin map)
+1. При первом запуске регистрирует администратора Metabase. Логин и пароль — `METABASE_ADMIN_EMAIL`
+   и `METABASE_ADMIN_PASSWORD` из `.env` (учебные значения в `.env.example`, только localhost).
+2. Подключает БД «Earthquakes CDM»: host `warehouse`, port `5432`, database `earthquakes`,
+   user/password `bi_reader`. Metabase видит **только схему `cdm`** — это и есть проверка прав.
+3. Синхронизирует схему, ставит полям `latitude`/`longitude` типы Latitude/Longitude (для карт),
+   включает списки значений для фильтров «Сеть» и «Глубина».
+4. Создаёт коллекцию «LR3 Землетрясения»: 27 SQL-карточек и два дашборда.
 
-```sql
-SELECT latitude, longitude, magnitude, depth_km, event_time, place, review_status, network_code
-FROM cdm.event_map
-WHERE 1=1 [[AND {{date}}]] [[AND {{mag}}]] [[AND {{net}}]] [[AND {{depth}}]]
-ORDER BY magnitude DESC NULLS LAST
-LIMIT 5000;
-```
+Повторный запуск архивирует прежние карточки и пересобирает дашборды **на тех же адресах**:
+обычно `http://localhost:3334/dashboard/3` (основной) и `/dashboard/2` (история события) —
+скрипт печатает точные ссылки. SQL каждой карточки — в словаре `C` скрипта.
 
-`{{date}}` → `event_map.event_date`, `{{mag}}` → `event_map.magnitude`. Для плотности
-вместо пинов можно выбрать Grid map. `LIMIT` — чтобы браузер не тормозил на 30+ тыс. точек;
-сортировка по магнитуде оставляет на карте самые сильные.
+## Дашборд «Сейсмическая активность USGS»
 
-### 2. Событий в день по классам магнитуды (Bar, stacked)
+Фильтры сверху действуют на все вкладки: **Дата** (любой период), **Магнитуда от**
+(по `magnitude` или корзине `mag_bin`), **Сеть**, **Глубина**. У каждой карточки есть
+описание (значок ⓘ) — что показано и как считать.
 
-```sql
-SELECT event_date AS "Дата", mag_class AS "Класс", sum(events_cnt) AS "Событий"
-FROM cdm.daily_activity
-WHERE 1=1 [[AND {{date}}]] [[AND {{mag}}]] [[AND {{net}}]] [[AND {{depth}}]]
-GROUP BY 1, 2 ORDER BY 1, 2;
-```
+| Вкладка | Карточки | Витрины |
+|---|---|---|
+| **Обзор** | пояснение конвейера; KPI: событий, макс. и средняя M, доля reviewed, уточнено, последняя загрузка; карта 2000 сильнейших событий; события по дням (stacked по классам M); глубина очагов (donut); магнитуда × глубина (scatter); 20 сильнейших | `daily_activity`, `event_map`, `pipeline_health` |
+| **Проверка USGS** | доля reviewed; статусы (donut); доля reviewed по сетям; доля reviewed vs возраст события; **динамика доли reviewed по часам (SCD2 time travel)**; полнота полей по дням | `daily_activity`, `event_map`, `review_summary`, `review_dynamics` |
+| **Уточнения (SCD2)** | уточнено событий; что меняется (M/статус/глубина/координаты); распределение Δ M; таблица уточнённых событий | `revision_summary` |
+| **Качество и конвейер** | последняя загрузка; исключённые типы (взрывы, карьеры…); версии SCD2 по запускам; проверки качества; журнал запусков | `data_quality`, `pipeline_health` |
 
-Настройки: X — Дата, серии — Класс, Stack — stacked.
+### Интерактивность
 
-### 3. Доля reviewed по сетям (Row chart)
+| Действие | Результат |
+|---|---|
+| Клик по столбцу дня в «Событий в день» | фильтр «Дата» = этот день на всём дашборде |
+| Клик по сектору «Глубина очагов» | фильтр «Глубина» |
+| Клик по столбцу сети в «Доля reviewed по сетям» | фильтр «Сеть» — например, `nc` показывает, что Северная Калифорния проверяет события только через ~10 суток |
+| Клик по `event_id` в «Сильнейших» или «Уточнённых событиях» | переход на дашборд «История события» с этим событием |
+| Клик по «Месту» в «Сильнейших» | страница события на сайте USGS |
+| Наведение на точку карты / столбец | подсказка со всеми полями строки |
 
-```sql
-SELECT network_code AS "Сеть", sum(events_cnt) AS "Событий",
-       sum(reviewed_cnt)::numeric / sum(events_cnt) AS "Доля reviewed"
-FROM cdm.daily_activity
-WHERE 1=1 [[AND {{date}}]] [[AND {{mag}}]] [[AND {{net}}]] [[AND {{depth}}]]
-GROUP BY 1 HAVING sum(events_cnt) >= 20 ORDER BY 3 DESC;
-```
+Metabase запоминает последние значения фильтров у пользователя: перед показом сбросьте
+их крестиком у фильтра.
 
-### 4. Проверка событий со временем: доля reviewed vs возраст (Line)
+## Дашборд «История события (SCD2)»
 
-```sql
-SELECT event_age_days AS "Возраст, сут", sum(events_cnt) AS "Событий",
-       sum(reviewed_cnt)::numeric / sum(events_cnt) AS "Доля reviewed"
-FROM cdm.review_summary
-WHERE 1=1 [[AND {{net}}]]
-GROUP BY 1 ORDER BY 1;
-```
+Фильтр **Событие** (`event_id`); по умолчанию — самое уточнённое событие на момент сборки.
+Слева — список уточнённых событий (клик выбирает событие), справа — магнитуда по версиям
+(ступенчатая линия по `valid_from`) и положение эпицентра по версиям, внизу — таблица версий
+с интервалами `[valid_from, valid_to)`, изменением магнитуды и сменой статуса. Источник — `cdm.event_history`.
 
-Показывает, как свежие события из `automatic` со временем переходят в `reviewed`.
-Вторую ось (Событий) можно отключить или вывести столбцами.
+### Соответствие требованиям исходной лабы
 
-### 5. Динамика доли reviewed по часам наблюдения — SCD2 time travel (Line)
-
-```sql
-SELECT snapshot_at AS "Срез", sum(events_cnt) AS "Событий в каталоге",
-       sum(reviewed_cnt)::numeric / sum(events_cnt) AS "Доля reviewed"
-FROM cdm.review_dynamics
-WHERE 1=1 [[AND {{net}}]]
-GROUP BY 1 ORDER BY 1;
-```
-
-Каждая точка — состояние, которое DDS видел в тот час. Чем дольше работает DAG, тем
-информативнее график.
-
-### 6. Магнитуда и глубина (Scatter)
-
-```sql
-SELECT depth_km AS "Глубина, км", magnitude AS "Магнитуда", network_code AS "Сеть"
-FROM cdm.event_map
-WHERE magnitude IS NOT NULL AND depth_km IS NOT NULL
-  [[AND {{date}}]] [[AND {{mag}}]] [[AND {{net}}]] [[AND {{depth}}]]
-LIMIT 5000;
-```
-
-### 7. Уточнения событий (Table + Bar)
-
-```sql
--- 7a Топ уточнений магнитуды (Table)
-SELECT event_id, event_date, network_code, versions_cnt, first_magnitude, current_magnitude,
-       magnitude_delta, first_status, current_status, hours_to_review, location_shift_km
-FROM cdm.revision_summary
-WHERE is_revised [[AND {{date}}]] [[AND {{net}}]]
-ORDER BY abs(magnitude_delta) DESC NULLS LAST, versions_cnt DESC
-LIMIT 50;
-
--- 7b Что меняется при уточнении (Bar)
-SELECT 'магнитуда' AS "Атрибут", count(*) FILTER (WHERE magnitude_changed) AS "Событий"
-FROM cdm.revision_summary WHERE is_revised
-UNION ALL SELECT 'статус', count(*) FILTER (WHERE status_changed) FROM cdm.revision_summary WHERE is_revised
-UNION ALL SELECT 'глубина', count(*) FILTER (WHERE depth_delta_km <> 0) FROM cdm.revision_summary WHERE is_revised
-UNION ALL SELECT 'координаты', count(*) FILTER (WHERE location_shift_km > 0) FROM cdm.revision_summary WHERE is_revised;
-```
-
-### 8. Полнота данных по дням (Line) — аналог «доли заполненных аннотаций»
-
-```sql
-SELECT event_date AS "Дата",
-       sum(mag_filled_cnt)::numeric / sum(events_cnt)   AS "С магнитудой",
-       sum(depth_filled_cnt)::numeric / sum(events_cnt) AS "С глубиной",
-       sum(place_filled_cnt)::numeric / sum(events_cnt) AS "С описанием места"
-FROM cdm.daily_activity
-WHERE 1=1 [[AND {{date}}]] [[AND {{net}}]] [[AND {{depth}}]]
-GROUP BY 1 ORDER BY 1;
-```
-
-### 9. Здоровье конвейера и качество (Table)
-
-```sql
--- 9a Последние запуски
-SELECT started_at, run_kind, rows_read, rows_rejected, rows_stale, new_events,
-       versions_inserted, versions_closed
-FROM cdm.pipeline_health ORDER BY load_id DESC LIMIT 24;
-
--- 9b Качество данных
-SELECT check_group, check_name, records_cnt, total_cnt, share
-FROM cdm.data_quality ORDER BY check_group, records_cnt DESC;
-```
-
-### Раскладка
-
-```text
-┌─────────┬─────────┬──────────────┬──────────┬──────────────────┐
-│ K1      │ K2      │ K3           │ K4       │ K5               │
-├─────────┴─────────┴──────────────┴──────────┴──────────────────┤
-│ 1 Карта                                                       │
-├───────────────────────────────┬───────────────────────────────┤
-│ 2 Событий в день              │ 3 Доля reviewed по сетям      │
-├───────────────────────────────┼───────────────────────────────┤
-│ 4 Reviewed vs возраст         │ 5 Динамика reviewed (SCD2)    │
-├───────────────────────────────┼───────────────────────────────┤
-│ 6 Магнитуда × глубина         │ 7a/7b Уточнения               │
-├───────────────────────────────┼───────────────────────────────┤
-│ 8 Полнота данных              │ 9a/9b Конвейер и качество     │
-└───────────────────────────────┴───────────────────────────────┘
-```
-
-Соответствие требованиям исходной лабы — в [role3_plan.md](role3_plan.md#4-дашборд-соответствие-исходным-требованиям).
+| Требование | Где на дашборде |
+|---|---|
+| Доля «одобренных» | KPI «Доля reviewed», статусы, доля по сетям |
+| Доля «некорректных» | «Проверки качества»: отбраковка с причиной, неполные поля |
+| Динамика доли заполненных аннотаций | «Полнота данных по дням» |
+| Динамика доли одобренных | «Доля reviewed по часам наблюдения (SCD2)», «… vs возраст события» |
+| Разрезы | фильтры Дата, Магнитуда, Сеть, Глубина |
 
 ## Проверки
 
@@ -251,4 +142,3 @@ SELECT (SELECT count(*) FROM dds.event_versions WHERE is_current AND event_type=
        (SELECT sum(events_cnt) FROM cdm.daily_activity) AS cdm_daily;
 ```
 
-Скриншоты дашборда — в `docs/img/` (добавить после сборки в Metabase).

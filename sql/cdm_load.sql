@@ -102,6 +102,29 @@ CREATE TABLE IF NOT EXISTS cdm.revision_summary (
     hours_to_review       numeric
 );
 
+-- История версий текущих землетрясений (SCD2 для BI): одна строка на версию.
+CREATE TABLE IF NOT EXISTS cdm.event_history (
+    event_id           text NOT NULL,
+    version_no         integer NOT NULL,
+    versions_cnt       integer NOT NULL,
+    valid_from         timestamptz NOT NULL,
+    valid_to           timestamptz,
+    is_current         boolean NOT NULL,
+    event_time         timestamptz NOT NULL,
+    place              text,
+    network_code       text NOT NULL,
+    magnitude          numeric,
+    magnitude_type     text,
+    magnitude_change   numeric,
+    depth_km           numeric,
+    latitude           numeric NOT NULL,
+    longitude          numeric NOT NULL,
+    review_status      text NOT NULL,
+    status_change      text,
+    source_updated_at  timestamptz NOT NULL,
+    PRIMARY KEY (event_id, version_no)
+);
+
 -- Time travel по SCD2: состояние каталога на каждый час наблюдения.
 -- Для среза t берутся версии с valid_from <= t < valid_to.
 CREATE TABLE IF NOT EXISTS cdm.review_dynamics (
@@ -170,7 +193,7 @@ $$;
 SELECT pg_advisory_xact_lock(731005);
 
 TRUNCATE cdm.event_map, cdm.daily_activity, cdm.review_summary, cdm.revision_summary,
-         cdm.review_dynamics, cdm.pipeline_health, cdm.data_quality;
+         cdm.event_history, cdm.review_dynamics, cdm.pipeline_health, cdm.data_quality;
 
 -- Момент, на который актуальны данные: последний запуск DDS (или последнее наблюдение).
 CREATE TEMP TABLE tmp_as_of ON COMMIT DROP AS
@@ -249,7 +272,21 @@ JOIN (SELECT DISTINCT ON (event_id) * FROM dds.event_versions
 LEFT JOIN (SELECT event_id, min(valid_from) AS reviewed_from FROM dds.event_versions
            WHERE review_status = 'reviewed' GROUP BY event_id) r ON r.event_id = c.event_id;
 
--- 3.5 Time travel: срез каждый час наблюдения и финальный срез на момент данных.
+-- 3.5 Все версии текущих землетрясений с изменением относительно предыдущей версии.
+INSERT INTO cdm.event_history
+SELECT h.event_id,
+       row_number() OVER w, c.versions_cnt,
+       h.valid_from, h.valid_to, h.is_current, h.event_time, h.place, h.network_code,
+       h.magnitude, h.magnitude_type, h.magnitude - lag(h.magnitude) OVER w,
+       h.depth_km, h.latitude, h.longitude, h.review_status,
+       CASE WHEN lag(h.review_status) OVER w <> h.review_status
+            THEN lag(h.review_status) OVER w || ' → ' || h.review_status END,
+       h.source_updated_at
+FROM dds.event_versions h
+JOIN tmp_cur c ON c.event_id = h.event_id
+WINDOW w AS (PARTITION BY h.event_id ORDER BY h.valid_from);
+
+-- 3.6 Time travel: срез каждый час наблюдения и финальный срез на момент данных.
 CREATE TEMP TABLE tmp_snap ON COMMIT DROP AS
 SELECT DISTINCT snapshot_at FROM (
     SELECT generate_series(date_trunc('hour', min(v.valid_from)) + interval '1 hour',
@@ -272,7 +309,7 @@ JOIN dds.event_versions v
 WHERE v.event_type = 'earthquake'
 GROUP BY 1, 2, 3;
 
--- 3.6 Журнал конвейера.
+-- 3.7 Журнал конвейера.
 INSERT INTO cdm.pipeline_health
 SELECT load_id, started_at,
        CASE WHEN rows_read = 0         THEN 'нет новых строк'
@@ -282,7 +319,7 @@ SELECT load_id, started_at,
        new_events, versions_inserted, versions_closed
 FROM dds.load_log;
 
--- 3.7 Качество данных.
+-- 3.8 Качество данных.
 INSERT INTO cdm.data_quality
 SELECT 'Отбраковка наблюдений', r.reason, count(*), t.total,
        round(count(*)::numeric / NULLIF(t.total, 0), 6)
