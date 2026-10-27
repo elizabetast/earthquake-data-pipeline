@@ -77,8 +77,9 @@ Airflow и Docker Compose — роль 1
 
 Счётчики и карта считаются по `is_current`, история версий — в уточнениях и динамике.
 
-Metabase собирается одной командой `python scripts/setup_metabase.py`: подключение `bi_reader`,
-27 карточек и два дашборда — «Сейсмическая активность USGS» (4 вкладки, фильтры, кросс-фильтры
+Metabase собирается одной командой `python scripts/setup_metabase.py` (или без Python на ноутбуке:
+`docker compose exec -T airflow-scheduler python - < scripts/setup_metabase.py`): подключение `bi_reader`,
+30 карточек и два дашборда — «Сейсмическая активность USGS» (4 вкладки, фильтры, кросс-фильтры
 по клику) и «История события (SCD2)», куда ведёт клик по `event_id`. Подробно — в docs/dashboard.md.
 Проверки — `scripts/check_cdm.py` (команда в разделе «Проверки и обслуживание»).
 

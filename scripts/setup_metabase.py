@@ -8,8 +8,12 @@
     «История события (SCD2)» — куда ведёт клик по событию.
 Повторный запуск архивирует прежние карточки коллекции и собирает всё заново.
 
-Запуск с ноутбука после успешного dds_to_cdm (нужен только Python 3):
-    python scripts/setup_metabase.py
+Запуск после успешного dds_to_cdm — любой из двух вариантов:
+    python scripts/setup_metabase.py          (Windows; на macOS/Linux — python3)
+    docker compose exec -T airflow-scheduler python - < scripts/setup_metabase.py
+Второй вариант не требует Python на ноутбуке: скрипт выполняется в контейнере Airflow.
+Если Metabase уже настроен вручную другим администратором, задайте его данные:
+    METABASE_ADMIN_EMAIL=... METABASE_ADMIN_PASSWORD=... python scripts/setup_metabase.py
 """
 import json
 import os
@@ -20,7 +24,16 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# Кириллица в выводе не должна ронять скрипт в консолях Windows с cp1251.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8', errors='replace')
+
+IN_DOCKER = Path('/opt/airflow/dags').exists()
+ROOT = Path(__file__).resolve().parents[1] if '__file__' in globals() else Path.cwd()
+# Значения по умолчанию совпадают с .env.example.
+DEFAULTS = {'METABASE_PORT': '3334', 'METABASE_ADMIN_EMAIL': 'admin@example.com',
+            'METABASE_ADMIN_PASSWORD': 'Lr3-e8ed32ec-mb'}
 
 
 def read_env():
@@ -32,12 +45,16 @@ def read_env():
                 if '=' in line and not line.lstrip().startswith('#'):
                     key, value = line.split('=', 1)
                     env.setdefault(key.strip(), value.strip())
+    for key, value in DEFAULTS.items():
+        env.setdefault(key, value)
     env.update({k: v for k, v in os.environ.items() if k.startswith(('METABASE_', 'MB_'))})
     return env
 
 
 ENV = read_env()
-BASE = ENV.get('MB_URL', f"http://localhost:{ENV.get('METABASE_PORT', '3334')}")
+# Из контейнера Airflow Metabase доступен по имени сервиса, с ноутбука — через проброшенный порт.
+BASE = ENV.get('MB_URL') or ('http://metabase:3000' if IN_DOCKER
+                             else f"http://localhost:{ENV['METABASE_PORT']}")
 EMAIL, PASSWORD = ENV['METABASE_ADMIN_EMAIL'], ENV['METABASE_ADMIN_PASSWORD']
 DB_NAME, COLLECTION = 'Earthquakes CDM', 'LR3 Землетрясения'
 MAIN_DASH, HISTORY_DASH = 'Сейсмическая активность USGS', 'История события (SCD2)'
@@ -57,7 +74,26 @@ def api(method, path, body=None):
             raw = resp.read()
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
+        if path == '/session' and e.code in (400, 401):
+            sys.exit(f'Metabase уже настроен, но вход под {EMAIL} не удался. Задайте логин и пароль '
+                     'своего администратора в METABASE_ADMIN_EMAIL / METABASE_ADMIN_PASSWORD.')
         sys.exit(f'{method} {path}: HTTP {e.code}\n{e.read().decode(errors="replace")[:2000]}')
+    except urllib.error.URLError as e:
+        sys.exit(f'Metabase недоступен по {BASE} ({e.reason}). Проверьте `docker compose ps`; '
+                 'после старта Metabase нужно 1–2 минуты.')
+
+
+def wait_metabase():
+    """Свежий контейнер Metabase отвечает не сразу: ждём /api/health до 5 минут."""
+    for _ in range(60):
+        try:
+            with urllib.request.urlopen(BASE + '/api/health', timeout=5) as resp:
+                if json.loads(resp.read()).get('status') == 'ok':
+                    return
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+        time.sleep(5)
+    sys.exit(f'Metabase не ответил по {BASE} за 5 минут. Проверьте `docker compose logs metabase`.')
 
 
 # --------------------------------------------------------------------------------------------
@@ -100,6 +136,7 @@ def ensure_database():
     schemas = {t.get('schema') for t in meta['tables']}
     print('Metabase видит схемы:', ', '.join(sorted(s for s in schemas if s)))
     fields = {(t, f['name']): f['id'] for t in tables for f in tables[t]['fields']}
+    fields.update({(t, '__table__'): tables[t]['id'] for t in tables})
     # Типы координат нужны, чтобы Metabase рисовал карту.
     for table in ('event_map', 'event_history'):
         api('PUT', f"/field/{fields[(table, 'latitude')]}", {'semantic_type': 'type/Latitude'})
@@ -142,14 +179,45 @@ EM = {'date': ('event_map', 'event_date'), 'mag': ('event_map', 'magnitude'),
 F_ALL = '1=1 [[AND {{date}}]] [[AND {{mag}}]] [[AND {{net}}]] [[AND {{depth}}]]'
 
 
-def pct(*cols):
+# Палитра проверена валидатором (dataviz): категориальные слоты 1–4 различимы и при дальтонизме,
+# классы магнитуды — одна синяя шкала от светлого к тёмному, «нет данных» — нейтральный серый.
+BLUE, ORANGE, AQUA, YELLOW, GRAY = '#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#a8a7a0'
+MAG_COLORS = {'1. M<2.5': '#86b6ef', '2. M2.5–4': '#5598e7', '3. M4–5': '#2a78d6',
+              '4. M5–6': '#1c5cab', '5. M6+': '#104281', '6. нет данных': GRAY}
+STATUS_COLORS = {'reviewed': BLUE, 'automatic': ORANGE, 'deleted': GRAY}
+# Весь мир одним видом: сетка не рисует ячейки через линию перемены дат, поэтому центр — 0°.
+WORLD = {'map.center_latitude': 20, 'map.center_longitude': 0, 'map.zoom': 0}
+
+
+def pct(*cols, decimals=1):
     return {'column_settings': {json.dumps(['name', c], ensure_ascii=False):
-                                {'number_style': 'percent', 'decimals': 1} for c in cols}}
+                                {'number_style': 'percent', 'decimals': decimals} for c in cols}}
 
 
-def card(name, display, query, tags=None, viz=None, description=''):
+def colors(mapping):
+    return {'series_settings': {name: {'color': color} for name, color in mapping.items()}}
+
+
+def merge(*parts):
+    """Склеивает настройки визуализации, объединяя column_settings и series_settings."""
+    out = {}
+    for part in parts:
+        for key, value in part.items():
+            out[key] = {**out.get(key, {}), **value} if isinstance(value, dict) else value
+    return out
+
+
+STATUS_FORMAT = {'table.column_formatting': [
+    {'id': 0, 'columns': ['Статус'], 'type': 'single', 'operator': '=', 'value': 'reviewed',
+     'color': BLUE, 'highlight_row': False},
+    {'id': 1, 'columns': ['Статус'], 'type': 'single', 'operator': '=', 'value': 'automatic',
+     'color': ORANGE, 'highlight_row': False}]}
+
+
+def card(name, display, query, tags=None, viz=None, description='', mbql=None):
+    """mbql — карточка конструктора запросов (нужна для карты-сетки), иначе — SQL."""
     return dict(name=name, display=display, query=query, tags=tags or {}, viz=viz or {},
-                description=description)
+                description=description, mbql=mbql)
 
 
 C = {
@@ -157,10 +225,16 @@ C = {
     'k_events': card('Событий', 'scalar',
                      f'SELECT sum(events_cnt) AS "Событий" FROM cdm.daily_activity WHERE {F_ALL}', DA,
                      description='Число текущих землетрясений (is_current) с учётом фильтров.'),
-    'k_max': card('Макс. магнитуда', 'scalar',
+    'k_max': card('Макс. M', 'scalar',
                   f'SELECT max(max_mag) AS "Макс. M" FROM cdm.daily_activity WHERE {F_ALL}', DA,
                   description='Максимальная магнитуда среди отфильтрованных событий.'),
-    'k_avg': card('Средняя магнитуда', 'scalar',
+    'k_trend': card('За сутки', 'smartscalar',
+                    'SELECT event_date AS "Дата", sum(events_cnt) AS "Событий"\n'
+                    f'FROM cdm.daily_activity WHERE {F_ALL}\n'
+                    '  AND event_date < (SELECT max(event_date) FROM cdm.daily_activity)\n'
+                    'GROUP BY 1 ORDER BY 1', DA,
+                    description='Последние полные сутки UTC и изменение к предыдущим (текущие сутки ещё неполные).'),
+    'k_avg': card('Средняя M', 'scalar',
                   f'SELECT round(sum(sum_mag) / NULLIF(sum(mag_filled_cnt), 0), 2) AS "Средняя M" '
                   f'FROM cdm.daily_activity WHERE {F_ALL}', DA,
                   description='sum(mag) / число событий с магнитудой: NULL не считается нулём.'),
@@ -168,14 +242,20 @@ C = {
                        'SELECT sum(reviewed_cnt)::numeric / NULLIF(sum(events_cnt), 0) AS "Доля reviewed" '
                        f'FROM cdm.daily_activity WHERE {F_ALL}', DA, pct('Доля reviewed'),
                        'Доля событий, проверенных сейсмологом USGS. Знаменатель — все события.'),
-    'k_revised': card('Уточнено событий', 'scalar',
+    'k_revised': card('Уточнено', 'scalar',
                       f'SELECT sum(revised_cnt) AS "Уточнено" FROM cdm.daily_activity WHERE {F_ALL}', DA,
                       description='События, у которых DDS сохранил больше одной версии (SCD2).'),
     'k_last': card('Последняя загрузка', 'scalar',
-                   'SELECT max(started_at) AS "Последняя загрузка" FROM cdm.pipeline_health',
-                   description='Время последнего запуска STG → DDS (UTC).'),
+                   "SELECT to_char(max(started_at) AT TIME ZONE 'UTC', 'DD.MM HH24:MI') || ' UTC'\n"
+                   '       AS "Последняя загрузка" FROM cdm.pipeline_health',
+                   description='Время последнего запуска STG → DDS. Конвейер работает каждый час в :15 UTC.'),
     # ---- Обзор
-    'map': card('Карта землетрясений', 'map',
+    'density': card('Плотность всех событий (сетка 3°)', 'map', None, EM,
+                    {'map.type': 'grid', **WORLD},
+                    'Все отфильтрованные землетрясения, число в ячейке 3°×3°. Яркие пятна в США — не только '
+                    'активность, но и густая сеть станций, которая ловит слабые толчки.',
+                    mbql='event_map'),
+    'map': card('Сильнейшие землетрясения на карте', 'map',
                 'SELECT event_id, latitude, longitude, magnitude, depth_km, event_time, place,\n'
                 '       review_status, network_code\n'
                 f'FROM cdm.event_map WHERE {F_ALL}\n'
@@ -186,62 +266,77 @@ C = {
     'daily': card('Событий в день по классам магнитуды', 'bar',
                   'SELECT event_date AS "Дата", mag_class AS "Класс", sum(events_cnt) AS "Событий"\n'
                   f'FROM cdm.daily_activity WHERE {F_ALL}\nGROUP BY 1, 2 ORDER BY 1, 2', DA,
-                  {'graph.dimensions': ['Дата', 'Класс'], 'graph.metrics': ['Событий'],
-                   'stackable.stack_type': 'stacked', 'graph.x_axis.title_text': 'Дата события (UTC)',
-                   'graph.y_axis.title_text': 'Событий'},
-                  'Клик по столбцу фильтрует весь дашборд по этому дню.'),
-    'depth_pie': card('Глубина очагов', 'pie',
-                      'SELECT depth_class AS "Класс глубины", sum(events_cnt) AS "Событий"\n'
-                      f'FROM cdm.daily_activity WHERE {F_ALL}\nGROUP BY 1 ORDER BY 1', DA,
-                      {'pie.dimension': 'Класс глубины', 'pie.metric': 'Событий'},
-                      'Клик по сектору — фильтр «Глубина».'),
+                  merge({'graph.dimensions': ['Дата', 'Класс'], 'graph.metrics': ['Событий'],
+                         'stackable.stack_type': 'stacked', 'graph.x_axis.title_text': 'Дата события (UTC)',
+                         'graph.y_axis.title_text': 'Событий'}, colors(MAG_COLORS)),
+                  'Чем темнее — тем сильнее. Клик по столбцу фильтрует весь дашборд по этому дню.'),
+    'depth': card('Глубина очагов', 'row',
+                  'SELECT depth_class AS "Класс глубины", sum(events_cnt) AS "Событий"\n'
+                  f'FROM cdm.daily_activity WHERE {F_ALL}\nGROUP BY 1 ORDER BY 1', DA,
+                  merge({'graph.dimensions': ['Класс глубины'], 'graph.metrics': ['Событий'],
+                         'graph.show_values': True}, colors({'Событий': BLUE})),
+                  'Подавляющее большинство очагов — мелкие. Клик по полосе — фильтр «Глубина».'),
+    'gr': card('Закон Гутенберга–Рихтера', 'bar',
+               'SELECT mag_bin AS "Магнитуда (шаг 0,5)", sum(events_cnt) AS "Событий"\n'
+               f'FROM cdm.daily_activity WHERE mag_bin IS NOT NULL AND {F_ALL}\nGROUP BY 1 ORDER BY 1', DA,
+               merge({'graph.dimensions': ['Магнитуда (шаг 0,5)'], 'graph.metrics': ['Событий'],
+                      'graph.x_axis.scale': 'ordinal', 'graph.y_axis.scale': 'log',
+                      'graph.y_axis.title_text': 'Событий (логарифмическая шкала)'},
+                     colors({'Событий': BLUE})),
+               'Справа от пиков каждая единица магнитуды — примерно в 10 раз меньше событий (на лог-шкале '
+               'прямая). Два пика: около M1 — порог плотных сетей США, около M4.5 — порог глобального '
+               'каталога: за пределами США слабые толчки почти не регистрируются.'),
     'scatter': card('Магнитуда и глубина', 'scatter',
                     'SELECT depth_km AS "Глубина, км", magnitude AS "Магнитуда", network_code AS "Сеть"\n'
                     'FROM cdm.event_map WHERE magnitude IS NOT NULL AND depth_km IS NOT NULL\n'
                     f'  AND {F_ALL}\nORDER BY magnitude DESC LIMIT 2000', EM,
-                    {'graph.dimensions': ['Глубина, км'], 'graph.metrics': ['Магнитуда'],
-                     'graph.x_axis.title_text': 'Глубина, км', 'graph.y_axis.title_text': 'Магнитуда'},
-                    'Сильные события бывают и мелкими, и глубокими (до ~700 км).'),
+                    merge({'graph.dimensions': ['Глубина, км'], 'graph.metrics': ['Магнитуда'],
+                           'graph.x_axis.title_text': 'Глубина, км', 'graph.y_axis.title_text': 'Магнитуда'},
+                          colors({'Магнитуда': BLUE})),
+                    '2000 сильнейших: сильные события бывают и мелкими, и глубокими (до ~700 км).'),
     'top': card('Сильнейшие землетрясения', 'table',
                 'SELECT event_id, event_time AS "Время (UTC)", magnitude AS "M", magnitude_type AS "Тип M",\n'
                 '       depth_km AS "Глубина, км", place AS "Место", review_status AS "Статус",\n'
                 '       network_code AS "Сеть", versions_cnt AS "Версий"\n'
                 f'FROM cdm.event_map WHERE magnitude IS NOT NULL AND {F_ALL}\n'
                 'ORDER BY magnitude DESC LIMIT 20', EM,
-                description='Клик по event_id — история версий события; по «Месту» — страница USGS.'),
+                merge({'column_settings': {'["name","M"]': {'show_mini_bar': True}}}, STATUS_FORMAT),
+                'Клик по event_id — история версий события; по «Месту» — страница USGS.'),
     # ---- Проверка USGS
     'status_pie': card('Статусы проверки', 'pie',
                        'SELECT review_status AS "Статус", count(*) AS "Событий"\n'
                        f'FROM cdm.event_map WHERE {F_ALL}\nGROUP BY 1 ORDER BY 2 DESC', EM,
-                       {'pie.dimension': 'Статус', 'pie.metric': 'Событий'},
+                       {'pie.dimension': 'Статус', 'pie.metric': 'Событий', 'pie.colors': STATUS_COLORS,
+                        'pie.show_legend': True, 'pie.percent_visibility': 'inside'},
                        'automatic — автоматическая оценка, reviewed — проверено сейсмологом.'),
     'by_net': card('Доля reviewed по сетям', 'bar',
                    'SELECT network_code AS "Сеть", sum(reviewed_cnt)::numeric / sum(events_cnt) AS "Доля reviewed",\n'
                    '       sum(events_cnt) AS "Событий"\n'
                    f'FROM cdm.daily_activity WHERE {F_ALL}\n'
                    'GROUP BY 1 HAVING sum(events_cnt) >= 20 ORDER BY 2 DESC', DA,
-                   {'graph.dimensions': ['Сеть'], 'graph.metrics': ['Доля reviewed'],
-                    'graph.max_categories_enabled': False, **pct('Доля reviewed')},
+                   merge({'graph.dimensions': ['Сеть'], 'graph.metrics': ['Доля reviewed'],
+                          'graph.max_categories_enabled': False}, pct('Доля reviewed'),
+                         colors({'Доля reviewed': BLUE})),
                    'Сеть — региональный сейсмоцентр (us, ak, nc, ci …). Клик — фильтр по сети.'),
     'by_age': card('Доля reviewed в зависимости от возраста события', 'line',
                    'SELECT event_age_days AS "Возраст, сут",\n'
                    '       sum(reviewed_cnt)::numeric / sum(events_cnt) AS "Доля reviewed"\n'
                    'FROM cdm.review_summary WHERE 1=1 [[AND {{net}}]]\nGROUP BY 1 ORDER BY 1',
                    {'net': ('review_summary', 'network_code')},
-                   {'graph.dimensions': ['Возраст, сут'], 'graph.metrics': ['Доля reviewed'],
-                    'graph.x_axis.title_text': 'Сколько суток прошло с события',
-                    **pct('Доля reviewed')},
+                   merge({'graph.dimensions': ['Возраст, сут'], 'graph.metrics': ['Доля reviewed'],
+                          'graph.x_axis.title_text': 'Сколько суток прошло с события',
+                          'graph.y_axis.min': 0, 'graph.y_axis.max': 1, 'graph.y_axis.auto_range': False},
+                         pct('Доля reviewed'), colors({'Доля reviewed': BLUE})),
                    'Свежие события ещё automatic; со временем USGS переводит их в reviewed.'),
-    'dynamics': card('Динамика доли reviewed по часам наблюдения (SCD2)', 'combo',
-                     'SELECT snapshot_at AS "Срез", sum(reviewed_cnt)::numeric / sum(events_cnt) AS "Доля reviewed",\n'
-                     '       sum(events_cnt) AS "Событий в каталоге"\n'
+    'dynamics': card('Динамика доли reviewed по часам наблюдения (SCD2)', 'line',
+                     'SELECT snapshot_at AS "Срез", sum(reviewed_cnt)::numeric / sum(events_cnt) AS "Доля reviewed"\n'
                      'FROM cdm.review_dynamics WHERE 1=1 [[AND {{net}}]]\nGROUP BY 1 ORDER BY 1',
                      {'net': ('review_dynamics', 'network_code')},
-                     {'graph.dimensions': ['Срез'], 'graph.metrics': ['Доля reviewed', 'Событий в каталоге'],
-                      'series_settings': {'Доля reviewed': {'display': 'line'},
-                                          'Событий в каталоге': {'display': 'bar', 'axis': 'right'}},
-                      **pct('Доля reviewed')},
-                     'Time travel: каждая точка — каталог таким, каким DDS видел его в тот час.'),
+                     merge({'graph.dimensions': ['Срез'], 'graph.metrics': ['Доля reviewed'],
+                            'graph.show_values': True, 'graph.label_value_frequency': 'fit'},
+                           pct('Доля reviewed'), colors({'Доля reviewed': BLUE})),
+                     'Time travel: каждая точка — каталог таким, каким DDS видел его в тот час '
+                     '(версии с valid_from ≤ час < valid_to). Точек столько, сколько часов работает конвейер.'),
     'completeness': card('Полнота данных по дням', 'line',
                          'SELECT event_date AS "Дата",\n'
                          '       sum(mag_filled_cnt)::numeric / sum(events_cnt)   AS "С магнитудой",\n'
@@ -249,10 +344,15 @@ C = {
                          '       sum(place_filled_cnt)::numeric / sum(events_cnt) AS "С описанием места",\n'
                          '       sum(reviewed_cnt)::numeric / sum(events_cnt)     AS "Reviewed"\n'
                          f'FROM cdm.daily_activity WHERE {F_ALL}\nGROUP BY 1 ORDER BY 1', DA,
-                         {'graph.dimensions': ['Дата'],
-                          'graph.metrics': ['С магнитудой', 'С глубиной', 'С описанием места', 'Reviewed'],
-                          **pct('С магнитудой', 'С глубиной', 'С описанием места', 'Reviewed')},
-                         'Аналог «доли заполненных аннотаций»: какая доля событий дня имеет поле.'),
+                         merge({'graph.dimensions': ['Дата'],
+                                'graph.metrics': ['С магнитудой', 'С глубиной', 'С описанием места', 'Reviewed'],
+                                'graph.y_axis.auto_split': False, 'graph.y_axis.min': 0,
+                                'graph.y_axis.max': 1, 'graph.y_axis.auto_range': False},
+                               pct('С магнитудой', 'С глубиной', 'С описанием места', 'Reviewed'),
+                               colors({'С магнитудой': BLUE, 'С глубиной': ORANGE,
+                                       'С описанием места': AQUA, 'Reviewed': YELLOW})),
+                         'Аналог «доли заполненных аннотаций»: какая доля событий дня имеет поле. '
+                         'Поля почти всегда заполнены (линии у 100 %), а reviewed падает у свежих дней.'),
     # ---- Уточнения
     'what_changed': card('Что меняется при уточнении', 'bar',
                          "SELECT 'магнитуда' AS \"Атрибут\", count(*) FILTER (WHERE magnitude_changed) AS \"Событий\"\n"
@@ -282,7 +382,10 @@ C = {
                       'FROM cdm.revision_summary WHERE is_revised [[AND {{date}}]] [[AND {{net}}]]\n'
                       'ORDER BY abs(magnitude_delta) DESC NULLS LAST, versions_cnt DESC LIMIT 200',
                       {'date': ('revision_summary', 'event_date'), 'net': ('revision_summary', 'network_code')},
-                      description='Клик по event_id открывает историю версий события.'),
+                      {'table.column_formatting': [
+                          {'id': 0, 'columns': ['Δ M'], 'type': 'range', 'colors': [ORANGE, '#ffffff', BLUE],
+                           'min_type': 'custom', 'min_value': -0.5, 'max_type': 'custom', 'max_value': 0.5}]},
+                      'Δ M: оранжевый — магнитуду понизили, синий — повысили. Клик по event_id — история версий.'),
     # ---- Качество и конвейер
     'runs': card('Запуски конвейера', 'table',
                  'SELECT started_at AS "Запуск (UTC)", run_kind AS "Итог", rows_read AS "Прочитано STG",\n'
@@ -294,7 +397,9 @@ C = {
                        'SELECT started_at AS "Запуск", versions_inserted AS "Версий создано",\n'
                        '       versions_closed AS "Версий закрыто"\n'
                        'FROM cdm.pipeline_health WHERE load_id > 1 ORDER BY load_id',
-                       viz={'graph.dimensions': ['Запуск'], 'graph.metrics': ['Версий создано', 'Версий закрыто']},
+                       viz=merge({'graph.dimensions': ['Запуск'],
+                                  'graph.metrics': ['Версий создано', 'Версий закрыто']},
+                                 colors({'Версий создано': BLUE, 'Версий закрыто': ORANGE})),
                        description='Без первичной загрузки: сколько версий SCD2 даёт каждый часовой запуск.'),
     'types': card('Исключено из аналитики: не землетрясения', 'row',
                   "SELECT check_name AS \"Тип\", records_cnt AS \"Событий\" FROM cdm.data_quality\n"
@@ -321,8 +426,9 @@ C = {
                   'SELECT valid_from AS "Наблюдено", magnitude AS "Магнитуда"\n'
                   'FROM cdm.event_history WHERE {{event}} ORDER BY valid_from',
                   {'event': ('event_history', 'event_id')},
-                  {'graph.dimensions': ['Наблюдено'], 'graph.metrics': ['Магнитуда'],
-                   'line.interpolate': 'step-after', 'graph.show_values': True},
+                  merge({'graph.dimensions': ['Наблюдено'], 'graph.metrics': ['Магнитуда'],
+                         'line.interpolate': 'step-after', 'graph.show_values': True},
+                        colors({'Магнитуда': BLUE})),
                   'Ступенька — момент, когда пайплайн увидел новую версию (valid_from).'),
     'h_versions': card('Версии события (SCD2)', 'table',
                        'SELECT version_no AS "№", valid_from AS "Действует с", valid_to AS "Действует до",\n'
@@ -341,20 +447,34 @@ C = {
 }
 
 
+TARGETS = {}   # карточка → {тег: цель привязки фильтра дашборда}
+
+
 def create_cards(db_id, fields, coll_id):
     ids = {}
     for key, c in C.items():
-        tags = {t: {'id': str(uuid.uuid4()), 'name': t, 'display-name': TAGS[t][0],
-                    'type': 'dimension', 'dimension': ['field', fields[f], None],
-                    'widget-type': TAGS[t][1]}
-                for t, f in c['tags'].items()}
-        if 'event' in tags:
-            tags['event']['required'] = False
+        if c['mbql']:
+            # Карта-сетка строится только по запросу конструктора с биннингом координат.
+            table = c['mbql']
+            binned = [['field', fields[(table, col)], {'binning': {'strategy': 'bin-width', 'bin-width': 3}}]
+                      for col in ('latitude', 'longitude')]
+            query = {'type': 'query', 'database': db_id,
+                     'query': {'source-table': fields[(table, '__table__')],
+                               'aggregation': [['count']], 'breakout': binned}}
+            TARGETS[key] = {t: ['dimension', ['field', fields[f], None]] for t, f in c['tags'].items()}
+        else:
+            tags = {t: {'id': str(uuid.uuid4()), 'name': t, 'display-name': TAGS[t][0],
+                        'type': 'dimension', 'dimension': ['field', fields[f], None],
+                        'widget-type': TAGS[t][1]}
+                    for t, f in c['tags'].items()}
+            if 'event' in tags:
+                tags['event']['required'] = False
+            query = {'type': 'native', 'database': db_id,
+                     'native': {'query': c['query'], 'template-tags': tags}}
+            TARGETS[key] = {t: ['dimension', ['template-tag', t]] for t in c['tags']}
         ids[key] = api('POST', '/card', {
             'name': c['name'], 'description': c['description'] or None, 'display': c['display'],
-            'collection_id': coll_id, 'visualization_settings': c['viz'],
-            'dataset_query': {'type': 'native', 'database': db_id,
-                              'native': {'query': c['query'], 'template-tags': tags}},
+            'collection_id': coll_id, 'visualization_settings': c['viz'], 'dataset_query': query,
         })['id']
     print('Metabase: создано карточек', len(ids))
     return ids
@@ -395,8 +515,8 @@ def build_dashboard(dash_id, ids, params, tabs, layout):
         else:
             cid = ids[item]
             dc.update(card_id=cid, visualization_settings=click or {}, parameter_mappings=[
-                {'parameter_id': PARAMS[t], 'card_id': cid, 'target': ['dimension', ['template-tag', t]]}
-                for t in C[item]['tags'] if PARAMS[t] in {p['id'] for p in params}])
+                {'parameter_id': PARAMS[t], 'card_id': cid, 'target': target}
+                for t, target in TARGETS[item].items() if PARAMS[t] in {p['id'] for p in params}])
         dashcards.append(dc)
     body = {'parameters': params, 'dashcards': dashcards}
     if tabs:
@@ -414,7 +534,7 @@ MAIN_PARAMS = [
 INTRO = """## Сейсмическая активность USGS — 90 суток + наблюдение каждый час
 **Конвейер:** USGS API → STG (сырой JSON) → DDS (SCD2) → **CDM** (витрины) → Metabase. Airflow, каждый час в :15 UTC.
 
-**Как пользоваться:** фильтры сверху действуют на все вкладки. Клик по столбцу дня, сектору глубины
+**Как пользоваться:** фильтры сверху действуют на все вкладки. Клик по столбцу дня, полосе глубины
 или сети добавляет фильтр; клик по `event_id` открывает историю версий события.
 Считаются только **текущие версии** (`is_current`) и только `earthquake`."""
 
@@ -462,14 +582,16 @@ def create_dashboards(coll_id, existing, ids, default_event):
     build_dashboard(main['id'], ids, MAIN_PARAMS,
                     ['Обзор', 'Проверка USGS', 'Уточнения (SCD2)', 'Качество и конвейер'], [
         (1, text(INTRO), 0, 0, 24, 4, None),
-        (1, 'k_events', 4, 0, 4, 3, None), (1, 'k_max', 4, 4, 4, 3, None),
-        (1, 'k_avg', 4, 8, 4, 3, None), (1, 'k_reviewed', 4, 12, 4, 3, None),
-        (1, 'k_revised', 4, 16, 4, 3, None), (1, 'k_last', 4, 20, 4, 3, None),
+        (1, 'k_events', 4, 0, 4, 3, None), (1, 'k_trend', 4, 4, 4, 3, None),
+        (1, 'k_max', 4, 8, 3, 3, None), (1, 'k_avg', 4, 11, 3, 3, None),
+        (1, 'k_reviewed', 4, 14, 3, 3, None), (1, 'k_revised', 4, 17, 3, 3, None),
+        (1, 'k_last', 4, 20, 4, 3, None),
         (1, 'map', 7, 0, 24, 10, None),
-        (1, 'daily', 17, 0, 14, 7, crossfilter('p_date', 'Дата')),
-        (1, 'depth_pie', 17, 14, 10, 7, crossfilter('p_depth', 'Класс глубины')),
-        (1, 'scatter', 24, 0, 10, 8, None),
-        (1, 'top', 24, 10, 14, 8, top_click),
+        (1, 'daily', 17, 0, 16, 7, crossfilter('p_date', 'Дата')),
+        (1, 'depth', 17, 16, 8, 7, crossfilter('p_depth', 'Класс глубины')),
+        (1, 'density', 24, 0, 24, 10, None),
+        (1, 'gr', 34, 0, 10, 8, None), (1, 'scatter', 34, 10, 14, 8, None),
+        (1, 'top', 42, 0, 24, 8, top_click),
         (2, text(T_REVIEW), 0, 0, 24, 3, None),
         (2, 'k_reviewed', 3, 0, 6, 3, None), (2, 'status_pie', 3, 6, 8, 6, None),
         (2, 'by_net', 3, 14, 10, 6, crossfilter('p_net', 'Сеть')),
@@ -511,9 +633,11 @@ def default_event(db_id):
 
 
 if __name__ == '__main__':
+    wait_metabase()
     login()
     db_id, fields = ensure_database()
     coll_id, existing = ensure_collection()
     ids = create_cards(db_id, fields, coll_id)
     main_id, history_id = create_dashboards(coll_id, existing, ids, default_event(db_id))
-    print(f'Готово: {BASE}/dashboard/{main_id}  и  {BASE}/dashboard/{history_id}')
+    url = f"http://localhost:{ENV['METABASE_PORT']}"
+    print(f'Готово: {url}/dashboard/{main_id}  и  {url}/dashboard/{history_id}')
