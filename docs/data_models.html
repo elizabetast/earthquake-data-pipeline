@@ -2,136 +2,192 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Модели данных USGS</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&family=Unbounded:wght@500;600&display=swap">
 <style>
+/* Макет: колонка-документ, каждая схема — рисунок с подписью; тёмная тема — как пульт сейсмостанции. */
 :root {
-  --bg: #0b141c;
-  --card: #0f1a24;
-  --card-border: #26333f;
-  --fg: #eef2f6;
-  --muted: #95a3b1;
-  --chip-bg: #182a3b;
-  --chip-fg: #5fa8ec;
-  --green: #88bf4d;
-  --yellow: #f2cf5b;
-  --orange: #f2a86f;
-  --edge: #5d6e7e;
-  --font: "Lato", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --bg: #0a131b; --surface: #0f1b26; --head: #16232f; --line: #263441; --fg: #e9eef3; --muted: #93a2b0;
+  --edge: #5c6d7d; --fk: #63a9ea; --core: #8cc152; --mart: #f0c75a; --mb: #63a9ea; --trace: #8cc152;
+  --old: #2a3946; --exbox: #0d1c28; --focus: #f0c75a;
+  --display: "Unbounded", "Segoe UI", system-ui, sans-serif;
+  --body: "Golos Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
   color-scheme: dark;
 }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --bg: #eef2f5; --surface: #ffffff; --head: #e6ecf1; --line: #c8d2db; --fg: #15212c; --muted: #566676;
+  --edge: #7d8c99; --fk: #1d6db3; --core: #3e7d1a; --mart: #a87100; --mb: #1d6db3; --trace: #3e7d1a;
+  --old: #d3dbe2; --exbox: #f5f8fa; --focus: #a87100; color-scheme: light } }
+:root[data-theme="light"] {
+  --bg: #eef2f5; --surface: #ffffff; --head: #e6ecf1; --line: #c8d2db; --fg: #15212c; --muted: #566676;
+  --edge: #7d8c99; --fk: #1d6db3; --core: #3e7d1a; --mart: #a87100; --mb: #1d6db3; --trace: #3e7d1a;
+  --old: #d3dbe2; --exbox: #f5f8fa; --focus: #a87100; color-scheme: light }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 14px; line-height: 1.5; }
-.topbar { border-bottom: 1px solid var(--card-border); padding: 18px max(20px, env(safe-area-inset-left, 0px)); display: grid; gap: 4px; }
-.topbar h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
-.stats { color: var(--muted); font-size: 13px; }
-.muted { color: var(--muted); font-weight: 400; }
-.filters { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px max(20px, env(safe-area-inset-left, 0px)) 0; }
-.filter { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--card-border); border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 700; color: var(--fg); background: var(--card); }
-.chip { font-family: var(--font); font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 4px; background: var(--chip-bg); color: var(--chip-fg); }
-.chip.pk { color: var(--green); }
-.swatch { width: 16px; height: 11px; border-radius: 3px; border: 1.5px solid var(--edge); }
-.swatch.core { border-color: var(--green); }
-.swatch.mart { border-color: var(--yellow); }
-.swatch.mb { border-color: var(--chip-fg); }
-main { display: grid; gap: 16px; padding: 16px max(20px, env(safe-area-inset-left, 0px)) 40px; }
-.card { background: var(--card); border: 1px solid var(--card-border); border-radius: 8px; padding: 14px 16px 16px; display: grid; gap: 10px; min-width: 0; }
-.card h2 { margin: 0; font-size: 15px; font-weight: 800; }
-.card .scroll { overflow-x: auto; }
-.card svg { display: block; width: 100%; min-width: 980px; height: auto; }
-.card p { margin: 0; color: var(--muted); font-size: 13px; max-width: 110ch; }
-.card p code { font-family: var(--mono); font-size: 12px; color: var(--chip-fg); }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 20px; padding-block: 28px 56px; }
+header.top { display: flex; flex-wrap: wrap; gap: 20px 40px; align-items: flex-end; justify-content: space-between;
+  border-bottom: 1px solid var(--line); padding-bottom: 20px; }
+.lead { display: grid; gap: 10px; min-width: 0; max-width: 62ch; }
+.eyebrow { font: 600 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 0; font: 600 clamp(24px, 3.4vw, 34px)/1.15 var(--display); letter-spacing: -0.01em; text-wrap: balance; }
+.lead p { margin: 0; color: var(--muted); }
+.figures { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 500 13px/1.4 var(--mono); color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+.figures b { color: var(--fg); font-weight: 600; }
+.seismo-box { display: grid; gap: 4px; min-width: 0; }
+.seismo-box .cap { font: 500 12px/1.3 var(--mono); color: var(--muted); }
+.seismo { width: min(420px, 100%); height: auto; display: block; }
+.seismo .trace { fill: none; stroke: var(--trace); stroke-width: 1.6; stroke-linejoin: round; }
+.seismo .grid { stroke: var(--line); stroke-dasharray: 2 4; }
+.seismo .base { stroke: var(--edge); }
+.seismo .ax { fill: var(--muted); font: 10.5px var(--mono); font-variant-numeric: tabular-nums; }
+.seismo .peak { fill: var(--mart); }
+nav.toc { display: flex; flex-wrap: wrap; gap: 8px; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); padding-block: 10px; border-bottom: 1px solid var(--line); }
+nav.toc a { font: 600 13px/1 var(--body); color: var(--fg); text-decoration: none; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+nav.toc a:hover, nav.toc a:focus-visible { border-color: var(--fk); color: var(--fk); outline: none; }
+nav.toc a span { color: var(--muted); font-family: var(--mono); font-weight: 500; margin-right: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--muted); align-items: center; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.chip { font: 700 11px/1 var(--mono); padding: 3px 6px; border-radius: 4px; background: var(--head); color: var(--fk); }
+.chip.pk { color: var(--core); }
+.sw { width: 18px; height: 12px; border-radius: 3px; border: 2px solid var(--edge); }
+.sw.core { border-color: var(--core); } .sw.mart { border-color: var(--mart); } .sw.mb { border-color: var(--mb); }
+.hint { font-size: 13px; color: var(--muted); }
+section.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 18px 20px 20px; display: grid; gap: 14px; min-width: 0; scroll-margin-top: 72px; }
+section.card > header { display: grid; gap: 6px; }
+.card h2 { margin: 0; font: 600 18px/1.3 var(--display); text-wrap: balance; }
+.card h2 small { font: 600 11px/1 var(--mono); color: var(--muted); letter-spacing: .1em; text-transform: uppercase;
+  display: block; margin-bottom: 8px; }
+figure { margin: 0; display: grid; gap: 10px; min-width: 0; }
+.scroll { overflow-x: auto; min-width: 0; }
+figure svg { display: block; width: 100%; min-width: 980px; height: auto; }
+figcaption, .card p { margin: 0; color: var(--muted); font-size: 14px; max-width: 75ch; }
+.card code, figcaption code { font: 12.5px var(--mono); color: var(--fk); }
+h3 { margin: 6px 0 0; font: 600 14px/1.3 var(--body); }
 
-svg text { fill: var(--fg); font-family: var(--font); font-size: 12px; }
-svg .tbl .body { fill: var(--bg); stroke: var(--card-border); stroke-width: 1.3; }
-svg .tbl .head { fill: #15222e; }
-svg .tbl .title { font-weight: 800; font-size: 13px; }
-svg .tbl.core .body { stroke: var(--green); stroke-width: 1.8; }
-svg .tbl.mart .body { stroke: var(--yellow); stroke-width: 1.6; }
-svg .mark { font-size: 10px; font-weight: 800; }
-svg .mark.pk { fill: var(--green); }
-svg .mark.fk { fill: var(--chip-fg); }
-svg .col { fill: var(--fg); font-family: var(--mono); font-size: 11.5px; }
-svg .col.cur { fill: var(--green); }
-svg .colh { fill: var(--muted); font-family: var(--mono); font-size: 11px; font-weight: 700; }
+svg text { fill: var(--fg); font-family: var(--body); font-size: 12px; }
+svg .tbl .body { fill: var(--bg); stroke: var(--line); stroke-width: 1.3; }
+svg .tbl .head { fill: var(--head); }
+svg .tbl .title { font: 700 13px var(--mono); }
+svg .tbl.core .body { stroke: var(--core); stroke-width: 1.8; }
+svg .tbl.mart .body { stroke: var(--mart); stroke-width: 1.6; }
+svg .mark { font: 800 10px var(--mono); }
+svg .mark.pk { fill: var(--core); } svg .mark.fk { fill: var(--fk); }
+svg .col { font: 11.5px var(--mono); }
+svg .col.cur { fill: var(--core); }
+svg .colh { fill: var(--muted); font: 700 11px var(--mono); }
 svg .note { fill: var(--muted); font-size: 11px; font-style: italic; }
 svg .edge { fill: none; stroke: var(--edge); stroke-width: 1.4; }
 svg .arrowhead { fill: var(--edge); }
-svg .cardi { fill: var(--muted); font-size: 11px; font-weight: 800; }
-svg .elabel { fill: var(--muted); font-family: var(--mono); font-size: 10.5px; }
-svg .labelbg { fill: var(--card); }
-svg .zone { fill: var(--muted); font-size: 11.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
-svg .divider { stroke: var(--card-border); stroke-width: 1; }
+svg .cardi { fill: var(--muted); font: 800 11px var(--body); }
+svg .elabel { fill: var(--muted); font: 10.5px var(--mono); }
+svg .labelbg { fill: var(--surface); }
+svg .zone { fill: var(--muted); font: 700 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+svg .divider { stroke: var(--line); }
+svg .tickline { stroke: var(--line); stroke-dasharray: 2 3; }
 svg .node rect { fill: var(--bg); stroke: var(--edge); stroke-width: 1.3; }
-svg .node.src rect { stroke: var(--green); }
-svg .node.dst rect { stroke: var(--yellow); }
-svg .node.mb rect { stroke: var(--chip-fg); }
-svg .node .title { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+svg .node.src rect, svg .node.core rect { stroke: var(--core); }
+svg .node.dst rect { stroke: var(--mart); } svg .node.mb rect { stroke: var(--mb); }
+svg .node .title { font: 600 12px var(--mono); }
 svg .node .sub { fill: var(--muted); font-size: 11.5px; }
-svg .example { fill: #101f2b; stroke: var(--chip-fg); stroke-width: 1.2; stroke-dasharray: 5 4; }
-svg .title.ex { font-weight: 800; font-size: 13px; }
+svg .node .sub.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+svg .exbox { fill: var(--exbox); stroke: var(--fk); stroke-width: 1.2; stroke-dasharray: 5 4; }
+svg .title.ex { font: 700 13px var(--body); }
 svg .sub2 { fill: var(--muted); font-size: 11.5px; }
-svg .axis { stroke: var(--edge); stroke-width: 1; }
-svg .seg.old { fill: #2b3a48; }
-svg .seg.cur { fill: var(--green); }
-svg .segl { font-size: 11px; font-weight: 700; }
-svg .segl.dark { fill: #0b141c; }
-svg .tick { fill: var(--muted); font-family: var(--mono); font-size: 10.5px; }
-svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2 3; }
+svg .axis { stroke: var(--edge); }
+svg .seg.old { fill: var(--old); } svg .seg.cur { fill: var(--core); }
+svg .segl { font: 700 11px var(--body); } svg .segl.on { fill: var(--bg); }
+svg .tick { fill: var(--muted); font: 10.5px var(--mono); }
+svg .step rect { fill: var(--bg); stroke: var(--edge); stroke-width: 1.3; }
+svg .step.in rect { stroke: var(--fk); } svg .step.ask rect { stroke: var(--mart); stroke-dasharray: 5 3; }
+svg .step.act rect { stroke: var(--core); stroke-width: 1.8; } svg .step.skip rect { stroke: var(--line); }
+svg .step .title { font: 700 13px var(--body); } svg .step .sub { fill: var(--muted); font: 11.5px var(--mono); }
+svg .step.act .sub { fill: var(--fg); }
+svg .yesno { fill: var(--fg); font: 700 11px var(--body); }
 
+/* Подсветка: наведите или переведите фокус на таблицу — видны её связи. */
+svg.graph .tbl, svg.graph .node, svg.graph .link { transition: opacity .15s; }
+svg.graph.dim .tbl, svg.graph.dim .node, svg.graph.dim .link, svg.graph.dim .example { opacity: .22; }
+svg.graph.dim .on { opacity: 1; }
+svg.graph .link.on .edge { stroke: var(--fk); stroke-width: 2.2; }
+svg .tbl, svg .node { cursor: pointer; outline: none; }
+svg .tbl:focus-visible .body, svg .node:focus-visible rect { stroke: var(--focus); stroke-width: 2.4; }
+@media (prefers-reduced-motion: reduce) { svg.graph * { transition: none !important; } }
+@media (max-width: 640px) { body { font-size: 14px; } section.card { padding: 14px; scroll-margin-top: 12px; }
+  nav.toc { position: static; } }
 </style>
 </head>
 <body>
-<header class="topbar"><h1>Модели данных: конвейер землетрясений USGS</h1>
-<div class="stats">Данные на 28.10.2026 10:08 UTC · STG 33 996 наблюдений · DDS 33 850 версий
-· CDM 33 032 землетрясения · 58 уточнены за время наблюдения</div></header>
-<div class="filters" aria-label="Обозначения">
-  <span class="filter"><span class="chip pk">PK</span> ключ таблицы</span>
-  <span class="filter"><span class="chip">FK</span> ссылка на другую таблицу</span>
-  <span class="filter">1 → N&nbsp;<span class="muted">одна строка связана со многими</span></span>
-  <span class="filter"><span class="swatch core"></span> главная таблица слоя</span>
-  <span class="filter"><span class="swatch mart"></span> витрина</span>
-  <span class="filter"><span class="swatch mb"></span> дашборд</span>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker></defs></svg>
+<div class="wrap">
+<header class="top">
+  <div class="lead">
+    <span class="eyebrow">ЛР3 · ППАД · конвейер данных</span>
+    <h1>Модели данных: землетрясения USGS</h1>
+    <p>Как каталог USGS проходит через слои хранилища: сырой JSON, история версий по SCD2 и витрины для Metabase.</p>
+    <div class="figures"><span><b>33 996</b> наблюдений в STG</span><span><b>33 850</b> версий в DDS</span>
+      <span><b>33 032</b> землетрясения в CDM</span><span><b>58</b> уточнены</span></div>
+  </div>
+  <div class="seismo-box">
+    <span class="cap">Землетрясений в сутки · 90 полных дней · в среднем 366</span>
+    <svg class="seismo" viewBox="0 0 420 96" role="img" aria-label="Число землетрясений по дням с 30.07 по 27.10: от 215 до 525, в среднем 366 в сутки"><line class="grid" x1="34" y1="10.0" x2="412" y2="10.0"/><line class="grid" x1="34" y1="30.0" x2="412" y2="30.0"/><line class="base" x1="34" y1="76.0" x2="412" y2="76.0"/><text class="ax" x="28" y="14.0" text-anchor="end">525</text><text class="ax" x="28" y="34.0" text-anchor="end">366</text><text class="ax" x="28" y="80.0" text-anchor="end">0</text><polyline class="trace" points="34.0,31.6 38.2,30.7 42.5,26.8 46.7,30.6 51.0,33.9 55.2,32.4 59.5,33.0 63.7,32.9 68.0,17.9 72.2,13.0 76.5,16.4 80.7,29.7 85.0,24.0 89.2,31.9 93.5,33.9 97.7,25.0 102.0,21.4 106.2,30.0 110.4,34.0 114.7,24.3 118.9,17.5 123.2,26.0 127.4,25.6 131.7,29.9 135.9,10.5 140.2,29.1 144.4,25.6 148.7,30.9 152.9,29.0 157.2,31.9 161.4,31.5 165.7,26.8 169.9,32.3 174.2,28.9 178.4,35.9 182.7,18.8 186.9,29.9 191.1,33.4 195.4,33.0 199.6,25.5 203.9,29.2 208.1,23.7 212.4,23.2 216.6,23.5 220.9,10.0 225.1,27.0 229.4,30.2 233.6,36.1 237.9,35.1 242.1,36.3 246.4,11.4 250.6,32.1 254.9,27.2 259.1,29.4 263.3,19.6 267.6,23.2 271.8,29.1 276.1,34.4 280.3,32.5 284.6,28.0 288.8,27.6 293.1,31.4 297.3,31.1 301.6,24.6 305.8,32.0 310.1,34.8 314.3,34.4 318.6,36.5 322.8,31.6 327.1,24.2 331.3,38.9 335.6,28.1 339.8,34.3 344.0,35.3 348.3,29.1 352.5,35.5 356.8,44.3 361.0,38.8 365.3,34.8 369.5,37.9 373.8,21.9 378.0,31.9 382.3,40.7 386.5,37.7 390.8,30.4 395.0,38.3 399.3,43.8 403.5,46.3 407.8,48.7 412.0,49.0"/><circle class="peak" cx="220.9" cy="10.0" r="3.5"/><text class="ax" x="34" y="92">30.07</text><text class="ax" x="412" y="92" text-anchor="end">27.10</text></svg>
+  </div>
+</header>
+<nav class="toc" aria-label="Разделы">
+  <a href="#path"><span>1</span>Путь данных</a><a href="#stg"><span>2</span>STG</a>
+  <a href="#dds"><span>3</span>DDS и SCD2</a><a href="#cdm"><span>4</span>Витрины</a>
+  <a href="#flow"><span>5</span>DDS → витрины</a><a href="#dash"><span>6</span>Витрины → дашборды</a>
+</nav>
+<div class="legend" aria-label="Обозначения">
+  <span><span class="chip pk">PK</span>ключ таблицы</span><span><span class="chip">FK</span>ссылка на другую таблицу</span>
+  <span><b>1 → N</b>одна строка связана со многими</span>
+  <span><span class="sw core"></span>главная таблица слоя</span><span><span class="sw mart"></span>витрина</span>
+  <span><span class="sw mb"></span>дашборд</span>
+  <span class="hint">Наведите на таблицу или выберите её клавишей Tab — подсветятся её связи.</span>
 </div>
-<main>
-<section class="card"><h2>Путь данных: от API до дашборда</h2><div class="scroll"><svg viewBox="0 0 1200 168" role="img" aria-label="Путь данных: USGS API, слой STG, слой DDS, витрины CDM, Metabase; между ними задачи Airflow"><defs><marker id="arrow-flow0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker></defs><g class="node src"><rect x="24" y="46" width="176" height="64" rx="6"/><text class="title" x="36" y="66">USGS API</text><text class="sub" x="36" y="84">каталог землетрясений</text><text class="sub" x="36" y="101">GeoJSON, без ключа</text></g>
-<g class="node "><rect x="264" y="46" width="176" height="64" rx="6"/><text class="title" x="276" y="66">stg</text><text class="sub" x="276" y="84">сырой JSON как пришёл</text><text class="sub" x="276" y="101">33 996 наблюдений</text></g>
-<g class="node "><rect x="504" y="46" width="176" height="64" rx="6"/><text class="title" x="516" y="66">dds</text><text class="sub" x="516" y="84">чистые данные + SCD2</text><text class="sub" x="516" y="101">33 850 версий</text></g>
-<g class="node dst"><rect x="744" y="46" width="176" height="64" rx="6"/><text class="title" x="756" y="66">cdm</text><text class="sub" x="756" y="84">8 витрин под графики</text><text class="sub" x="756" y="101">33 032 землетрясения</text></g>
-<g class="node dst"><rect x="984" y="46" width="176" height="64" rx="6"/><text class="title" x="996" y="66">Metabase</text><text class="sub" x="996" y="84">2 дашборда, 30 карточек</text><text class="sub" x="996" y="101">пользователь bi_reader</text></g>
-<polyline class="edge" points="200,78 264,78" marker-end="url(#arrow-flow0)"/>
-<text class="elabel" x="232.0" y="38" text-anchor="middle">collect_to_stg</text>
-<line class="tickline" x1="232.0" y1="42" x2="232.0" y2="76"/>
-<polyline class="edge" points="440,78 504,78" marker-end="url(#arrow-flow0)"/>
-<text class="elabel" x="472.0" y="38" text-anchor="middle">stg_to_dds</text>
-<line class="tickline" x1="472.0" y1="42" x2="472.0" y2="76"/>
-<polyline class="edge" points="680,78 744,78" marker-end="url(#arrow-flow0)"/>
-<text class="elabel" x="712.0" y="38" text-anchor="middle">dds_to_cdm</text>
-<line class="tickline" x1="712.0" y1="42" x2="712.0" y2="76"/>
-<polyline class="edge" points="920,78 984,78" marker-end="url(#arrow-flow0)"/>
-<text class="elabel" x="952.0" y="38" text-anchor="middle">только схема cdm</text>
-<line class="tickline" x1="952.0" y1="42" x2="952.0" y2="76"/>
-<line class="divider" x1="24" y1="132" x2="456" y2="132"/><text class="zone" x="24" y="152">Роль 1 · Docker, Airflow, сбор</text>
-<line class="divider" x1="504" y1="132" x2="696" y2="132"/><text class="zone" x="504" y="152">Роль 2 · DDS, SCD2</text>
-<line class="divider" x1="744" y1="132" x2="1176" y2="132"/><text class="zone" x="744" y="152">Роль 3 · витрины и Metabase</text>
-<text class="zone" x="24" y="16">Airflow: DAG earthquake_pipeline, каждый час в :15 UTC</text></svg></div><p>Раз в час Airflow запускает три задачи по очереди. <code>collect_to_stg</code> забирает у USGS новые и изменённые события и кладёт ответ как есть. <code>stg_to_dds</code> разбирает JSON, чистит данные и ведёт историю версий. <code>dds_to_cdm</code> пересобирает витрины. Metabase подключён под пользователем <code>bi_reader</code>, который видит только схему <code>cdm</code>.</p></section>
-<section class="card"><h2>Сырой слой (STG): ответы API без изменений</h2><div class="scroll"><svg viewBox="0 0 1024 300" role="img" aria-label="Сырой слой: загрузка связана с ответами API и наблюдениями событий"><defs><marker id="arrow-stg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker></defs><polyline class="edge" points="264,110 350,110" marker-end="url(#arrow-stg)"/>
+<section class="card" id="path"><header><h2><small>Раздел 1</small>Путь данных: от API до дашборда</h2></header><figure><div class="scroll"><svg class="graph" viewBox="0 0 1184 166" role="img" aria-label="Путь данных: USGS API, затем STG, DDS, CDM и Metabase; между слоями задачи Airflow"><g class="link" data-a="api" data-b="stg"><polyline class="edge" points="200,78 264,78" marker-end="url(#arrow)"/><line class="tickline" x1="232.0" y1="42" x2="232.0" y2="76"/><text class="elabel" x="232.0" y="38" text-anchor="middle">collect_to_stg</text></g>
+<g class="link" data-a="stg" data-b="dds"><polyline class="edge" points="440,78 504,78" marker-end="url(#arrow)"/><line class="tickline" x1="472.0" y1="42" x2="472.0" y2="76"/><text class="elabel" x="472.0" y="38" text-anchor="middle">stg_to_dds</text></g>
+<g class="link" data-a="dds" data-b="cdm"><polyline class="edge" points="680,78 744,78" marker-end="url(#arrow)"/><line class="tickline" x1="712.0" y1="42" x2="712.0" y2="76"/><text class="elabel" x="712.0" y="38" text-anchor="middle">dds_to_cdm</text></g>
+<g class="link" data-a="cdm" data-b="mb"><polyline class="edge" points="920,78 984,78" marker-end="url(#arrow)"/><line class="tickline" x1="952.0" y1="42" x2="952.0" y2="76"/><text class="elabel" x="952.0" y="38" text-anchor="middle">только схема cdm</text></g>
+<g class="node src" data-id="api" tabindex="0" aria-label="USGS API"><rect x="24" y="46" width="176" height="64" rx="6"/><text class="title" x="36" y="66">USGS API</text><text class="sub" x="36" y="84">каталог землетрясений</text><text class="sub num" x="36" y="101">GeoJSON, без ключа</text></g>
+<g class="node " data-id="stg" tabindex="0" aria-label="stg"><rect x="264" y="46" width="176" height="64" rx="6"/><text class="title" x="276" y="66">stg</text><text class="sub" x="276" y="84">сырой JSON как пришёл</text><text class="sub num" x="276" y="101">33 996 наблюдений</text></g>
+<g class="node core" data-id="dds" tabindex="0" aria-label="dds"><rect x="504" y="46" width="176" height="64" rx="6"/><text class="title" x="516" y="66">dds</text><text class="sub" x="516" y="84">чистые данные + SCD2</text><text class="sub num" x="516" y="101">33 850 версий</text></g>
+<g class="node dst" data-id="cdm" tabindex="0" aria-label="cdm"><rect x="744" y="46" width="176" height="64" rx="6"/><text class="title" x="756" y="66">cdm</text><text class="sub" x="756" y="84">8 витрин под графики</text><text class="sub num" x="756" y="101">33 032 землетрясения</text></g>
+<g class="node mb" data-id="mb" tabindex="0" aria-label="Metabase"><rect x="984" y="46" width="176" height="64" rx="6"/><text class="title" x="996" y="66">Metabase</text><text class="sub" x="996" y="84">2 дашборда, 30 карточек</text><text class="sub num" x="996" y="101">пользователь bi_reader</text></g>
+<line class="divider" x1="24" y1="132" x2="440" y2="132"/><text class="zone" x="24" y="152">Роль 1 · Docker, Airflow, сбор</text>
+<line class="divider" x1="504" y1="132" x2="680" y2="132"/><text class="zone" x="504" y="152">Роль 2 · DDS, SCD2</text>
+<line class="divider" x1="744" y1="132" x2="1160" y2="132"/><text class="zone" x="744" y="152">Роль 3 · витрины и Metabase</text>
+<text class="zone" x="24" y="16">Airflow · DAG earthquake_pipeline · каждый час в :15 UTC</text></svg></div><figcaption>Раз в час Airflow запускает три задачи по очереди. <code>collect_to_stg</code> забирает у USGS новые и изменённые события и кладёт ответ как есть, <code>stg_to_dds</code> разбирает JSON и ведёт историю версий, <code>dds_to_cdm</code> пересобирает витрины. Metabase подключён под <code>bi_reader</code> и видит только схему <code>cdm</code>.</figcaption></figure></section>
+<section class="card" id="stg"><header><h2><small>Раздел 2 · роль 1</small>Сырой слой (STG): ответы API без изменений</h2></header><figure><div class="scroll"><svg class="graph" viewBox="0 0 1024 300" role="img" aria-label="Сырой слой: одна загрузка связана со многими ответами API и наблюдениями событий"><g class="link" data-a="batches" data-b="api_responses">
+<polyline class="edge" points="264,110 350,110" marker-end="url(#arrow)"/>
 <text class="cardi" x="276" y="123" text-anchor="middle">1</text>
 <text class="cardi" x="338" y="123" text-anchor="middle">N</text>
 <text class="elabel" x="307" y="103" text-anchor="middle">batch_id</text>
-<polyline class="edge" points="610,110 700,110" marker-end="url(#arrow-stg)"/>
+</g>
+<g class="link" data-a="api_responses" data-b="earthquake_raw">
+<polyline class="edge" points="610,110 700,110" marker-end="url(#arrow)"/>
 <text class="cardi" x="622" y="123" text-anchor="middle">1</text>
 <text class="cardi" x="688" y="123" text-anchor="middle">N</text>
 <text class="elabel" x="655" y="103" text-anchor="middle">response_id</text>
-<polyline class="edge" points="144,223 144,288 850,288 850,261" marker-end="url(#arrow-stg)"/>
+</g>
+<g class="link" data-a="batches" data-b="earthquake_raw">
+<polyline class="edge" points="144,223 144,288 850,288 850,261" marker-end="url(#arrow)"/>
 <text class="cardi" x="134" y="235" text-anchor="middle">1</text>
 <text class="cardi" x="840" y="273" text-anchor="middle">N</text>
 <text class="elabel" x="497" y="281" text-anchor="middle">batch_id</text>
-<g class="tbl">
+</g>
+<g class="tbl " data-id="batches" tabindex="0" aria-label="Таблица batches">
 <rect class="body" x="24" y="50" width="240" height="173" rx="6"/>
-<rect class="head" x="24" y="50" width="240" height="30" rx="6"/>
-<rect class="head" x="24" y="72" width="240" height="8"/>
+<path class="head" d="M24,80 V56 a6,6 0 0 1 6,-6 H258 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="36" y="70">batches</text>
 <text class="mark pk" x="36" y="95">PK</text>
 <text class="col" x="66" y="95">batch_id = Airflow run_id</text>
@@ -142,10 +198,9 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="66" y="190">response_count, event_count</text>
 <text class="note" x="36" y="209">строк: 7 — одна на загрузку</text>
 </g>
-<g class="tbl">
+<g class="tbl " data-id="api_responses" tabindex="0" aria-label="Таблица api_responses">
 <rect class="body" x="350" y="50" width="260" height="173" rx="6"/>
-<rect class="head" x="350" y="50" width="260" height="30" rx="6"/>
-<rect class="head" x="350" y="72" width="260" height="8"/>
+<path class="head" d="M350,80 V56 a6,6 0 0 1 6,-6 H604 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="362" y="70">api_responses</text>
 <text class="mark pk" x="362" y="95">PK</text>
 <text class="col" x="392" y="95">id</text>
@@ -157,10 +212,9 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="392" y="190">fetched_at</text>
 <text class="note" x="362" y="209">строк: 96 — ответы API</text>
 </g>
-<g class="tbl core">
+<g class="tbl core" data-id="earthquake_raw" tabindex="0" aria-label="Таблица earthquake_raw">
 <rect class="body" x="700" y="50" width="300" height="211" rx="6"/>
-<rect class="head" x="700" y="50" width="300" height="30" rx="6"/>
-<rect class="head" x="700" y="72" width="300" height="8"/>
+<path class="head" d="M700,80 V56 a6,6 0 0 1 6,-6 H994 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="712" y="70">earthquake_raw</text>
 <text class="mark pk" x="712" y="95">PK</text>
 <text class="col" x="742" y="95">id (watermark для DDS)</text>
@@ -174,45 +228,48 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="742" y="209">payload jsonb (Feature)</text>
 <text class="col" x="742" y="228">loaded_at</text>
 <text class="note" x="712" y="247">строк: 33 996 — наблюдения событий</text>
-</g></svg></div><p>Каждая загрузка — строка в <code>batches</code>, её ключ — идентификатор запуска Airflow, поэтому повтор того же запуска ничего не дублирует. В <code>api_responses</code> лежит весь ответ API, в <code>earthquake_raw</code> — каждое событие отдельно, в исходном GeoJSON. Номер строки <code>id</code> служит отметкой (watermark): детальный слой забирает только строки с номером больше обработанного.</p></section>
-<section class="card"><h2>Детальный слой (DDS): события и история их версий</h2><div class="scroll"><svg viewBox="0 0 1232 692" role="img" aria-label="Детальный слой: справочники сетей и типов, события и их версии по SCD2, пример истории одного события, служебные таблицы"><defs><marker id="arrow-dds" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker></defs><text class="zone" x="24" y="486">Служебные таблицы: watermark, журнал загрузок, отбраковка</text>
-<line class="divider" x1="24" y1="470" x2="1208" y2="470"/>
-<polyline class="edge" points="240,110 300,110 300,133 380,133" marker-end="url(#arrow-dds)"/>
+</g></svg></div><figcaption>Каждая загрузка — строка в <code>batches</code> с ключом запуска Airflow, поэтому повтор того же запуска ничего не дублирует. В <code>api_responses</code> лежит весь ответ, в <code>earthquake_raw</code> — каждое событие в исходном GeoJSON. Номер строки <code>id</code> служит отметкой: DDS берёт только строки новее уже обработанных.</figcaption></figure></section>
+<section class="card" id="dds"><header><h2><small>Раздел 3 · роль 2</small>Детальный слой (DDS): события и история версий</h2></header><figure><div class="scroll"><svg class="graph" viewBox="0 0 1232 680" role="img" aria-label="Детальный слой: справочники и события связаны с версиями событий; пример истории одного события; служебные таблицы"><line class="divider" x1="24" y1="470" x2="1208" y2="470"/>
+<text class="zone" x="24" y="490">Служебные таблицы · watermark, журнал, отбраковка</text>
+<g class="link" data-a="dim_event_type" data-b="event_versions">
+<polyline class="edge" points="240,110 300,110 300,133 380,133" marker-end="url(#arrow)"/>
 <text class="cardi" x="252" y="123" text-anchor="middle">1</text>
 <text class="cardi" x="368" y="146" text-anchor="middle">N</text>
-<text class="elabel" x="270" y="103" text-anchor="middle">event_type</text>
-<polyline class="edge" points="240,250 314,250 314,152 380,152" marker-end="url(#arrow-dds)"/>
+<text class="elabel" x="248" y="103" text-anchor="start">event_type</text>
+</g>
+<g class="link" data-a="dim_network" data-b="event_versions">
+<polyline class="edge" points="240,250 314,250 314,152 380,152" marker-end="url(#arrow)"/>
 <text class="cardi" x="252" y="263" text-anchor="middle">1</text>
 <text class="cardi" x="368" y="165" text-anchor="middle">N</text>
-<text class="elabel" x="277" y="243" text-anchor="middle">network_code</text>
-<polyline class="edge" points="748,95 699,95 699,114 650,114" marker-end="url(#arrow-dds)"/>
+<text class="elabel" x="262" y="266" text-anchor="start">network_code</text>
+</g>
+<g class="link" data-a="events" data-b="event_versions">
+<polyline class="edge" points="748,95 699,95 699,114 650,114" marker-end="url(#arrow)"/>
 <text class="cardi" x="736" y="108" text-anchor="middle">1</text>
 <text class="cardi" x="662" y="127" text-anchor="middle">N</text>
 <text class="elabel" x="705" y="88" text-anchor="middle">event_id</text>
-<g class="tbl">
+</g>
+<g class="tbl " data-id="dim_event_type" tabindex="0" aria-label="Таблица dim_event_type">
 <rect class="body" x="24" y="50" width="216" height="97" rx="6"/>
-<rect class="head" x="24" y="50" width="216" height="30" rx="6"/>
-<rect class="head" x="24" y="72" width="216" height="8"/>
+<path class="head" d="M24,80 V56 a6,6 0 0 1 6,-6 H234 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="36" y="70">dim_event_type</text>
 <text class="mark pk" x="36" y="95">PK</text>
 <text class="col" x="66" y="95">event_type</text>
 <text class="col" x="66" y="114">first_seen_at</text>
 <text class="note" x="36" y="133">строк: 7</text>
 </g>
-<g class="tbl">
+<g class="tbl " data-id="dim_network" tabindex="0" aria-label="Таблица dim_network">
 <rect class="body" x="24" y="200" width="216" height="97" rx="6"/>
-<rect class="head" x="24" y="200" width="216" height="30" rx="6"/>
-<rect class="head" x="24" y="222" width="216" height="8"/>
+<path class="head" d="M24,230 V206 a6,6 0 0 1 6,-6 H234 a6,6 0 0 1 6,6 V230 Z"/>
 <text class="title" x="36" y="220">dim_network</text>
 <text class="mark pk" x="36" y="245">PK</text>
 <text class="col" x="66" y="245">network_code</text>
 <text class="col" x="66" y="264">first_seen_at</text>
 <text class="note" x="36" y="283">строк: 15</text>
 </g>
-<g class="tbl core">
+<g class="tbl core" data-id="event_versions" tabindex="0" aria-label="Таблица event_versions">
 <rect class="body" x="380" y="50" width="270" height="382" rx="6"/>
-<rect class="head" x="380" y="50" width="270" height="30" rx="6"/>
-<rect class="head" x="380" y="72" width="270" height="8"/>
+<path class="head" d="M380,80 V56 a6,6 0 0 1 6,-6 H644 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="392" y="70">event_versions</text>
 <text class="mark pk" x="392" y="95">PK</text>
 <text class="col" x="422" y="95">version_id</text>
@@ -237,10 +294,9 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="422" y="399">is_current</text>
 <text class="note" x="392" y="418">строк: 33 850 — версии событий</text>
 </g>
-<g class="tbl">
+<g class="tbl " data-id="events" tabindex="0" aria-label="Таблица events">
 <rect class="body" x="748" y="50" width="240" height="116" rx="6"/>
-<rect class="head" x="748" y="50" width="240" height="30" rx="6"/>
-<rect class="head" x="748" y="72" width="240" height="8"/>
+<path class="head" d="M748,80 V56 a6,6 0 0 1 6,-6 H982 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="760" y="70">events</text>
 <text class="mark pk" x="760" y="95">PK</text>
 <text class="col" x="790" y="95">event_id</text>
@@ -248,55 +304,52 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="790" y="133">first_stg_id → STG</text>
 <text class="note" x="760" y="152">строк: 33 792 — по одной на событие</text>
 </g>
-<g class="tbl">
-<rect class="body" x="24" y="500" width="216" height="97" rx="6"/>
-<rect class="head" x="24" y="500" width="216" height="30" rx="6"/>
-<rect class="head" x="24" y="522" width="216" height="8"/>
-<text class="title" x="36" y="520">etl_state</text>
-<text class="mark pk" x="36" y="545">PK</text>
-<text class="col" x="66" y="545">process</text>
-<text class="col" x="66" y="564">last_stg_id (watermark)</text>
-<text class="col" x="66" y="583">updated_at</text>
+<g class="tbl " data-id="etl_state" tabindex="0" aria-label="Таблица etl_state">
+<rect class="body" x="24" y="504" width="216" height="97" rx="6"/>
+<path class="head" d="M24,534 V510 a6,6 0 0 1 6,-6 H234 a6,6 0 0 1 6,6 V534 Z"/>
+<text class="title" x="36" y="524">etl_state</text>
+<text class="mark pk" x="36" y="549">PK</text>
+<text class="col" x="66" y="549">process</text>
+<text class="col" x="66" y="568">last_stg_id (watermark)</text>
+<text class="col" x="66" y="587">updated_at</text>
 </g>
-<g class="tbl">
-<rect class="body" x="380" y="500" width="270" height="192" rx="6"/>
-<rect class="head" x="380" y="500" width="270" height="30" rx="6"/>
-<rect class="head" x="380" y="522" width="270" height="8"/>
-<text class="title" x="392" y="520">load_log</text>
-<text class="mark pk" x="392" y="545">PK</text>
-<text class="col" x="422" y="545">load_id</text>
-<text class="col" x="422" y="564">started_at</text>
-<text class="col" x="422" y="583">stg_id_from, stg_id_to</text>
-<text class="col" x="422" y="602">rows_read, rows_rejected</text>
-<text class="col" x="422" y="621">rows_stale</text>
-<text class="col" x="422" y="640">new_events</text>
-<text class="col" x="422" y="659">versions_inserted, versions_closed</text>
-<text class="note" x="392" y="678">строк: 7 — один на запуск</text>
+<g class="tbl " data-id="load_log" tabindex="0" aria-label="Таблица load_log">
+<rect class="body" x="380" y="504" width="270" height="192" rx="6"/>
+<path class="head" d="M380,534 V510 a6,6 0 0 1 6,-6 H644 a6,6 0 0 1 6,6 V534 Z"/>
+<text class="title" x="392" y="524">load_log</text>
+<text class="mark pk" x="392" y="549">PK</text>
+<text class="col" x="422" y="549">load_id</text>
+<text class="col" x="422" y="568">started_at</text>
+<text class="col" x="422" y="587">stg_id_from, stg_id_to</text>
+<text class="col" x="422" y="606">rows_read, rows_rejected</text>
+<text class="col" x="422" y="625">rows_stale</text>
+<text class="col" x="422" y="644">new_events</text>
+<text class="col" x="422" y="663">versions_inserted, versions_closed</text>
+<text class="note" x="392" y="682">строк: 7 — один на запуск</text>
 </g>
-<g class="tbl">
-<rect class="body" x="748" y="500" width="240" height="135" rx="6"/>
-<rect class="head" x="748" y="500" width="240" height="30" rx="6"/>
-<rect class="head" x="748" y="522" width="240" height="8"/>
-<text class="title" x="760" y="520">rejected_observations</text>
-<text class="mark pk" x="760" y="545">PK</text>
-<text class="col" x="790" y="545">stg_id → STG</text>
-<text class="col" x="790" y="564">event_id</text>
-<text class="col" x="790" y="583">reason</text>
-<text class="col" x="790" y="602">rejected_at</text>
-<text class="note" x="760" y="621">строк: 0 — плохих записей не было</text>
+<g class="tbl " data-id="rejected_observations" tabindex="0" aria-label="Таблица rejected_observations">
+<rect class="body" x="748" y="504" width="240" height="135" rx="6"/>
+<path class="head" d="M748,534 V510 a6,6 0 0 1 6,-6 H982 a6,6 0 0 1 6,6 V534 Z"/>
+<text class="title" x="760" y="524">rejected_observations</text>
+<text class="mark pk" x="760" y="549">PK</text>
+<text class="col" x="790" y="549">stg_id → STG</text>
+<text class="col" x="790" y="568">event_id</text>
+<text class="col" x="790" y="587">reason</text>
+<text class="col" x="790" y="606">rejected_at</text>
+<text class="note" x="760" y="625">строк: 0 — плохих записей не было</text>
 </g>
-<rect class="example" x="748" y="200" width="460" height="226" rx="6"/>
-<text class="title ex" x="762" y="224">Пример SCD2: hv75064551</text>
-<text class="sub2" x="762" y="242">11 km S of Volcano, Hawaii — USGS уточнил магнитуду и проверил событие</text>
+<g class="example"><rect class="exbox" x="748" y="200" width="460" height="226" rx="6"/>
+<text class="title ex" x="762" y="224">Пример: событие hv75064551</text>
+<text class="sub2" x="762" y="242">11 km S of Volcano, Hawaii · USGS уточнил магнитуду и проверил событие</text>
+<text class="sub2" x="762" y="272">Полосы — интервалы [valid_from, valid_to), когда версия была текущей</text>
 <line class="axis" x1="772" y1="314" x2="1184" y2="314"/>
 <rect class="seg old" x="772" y="292" width="210" height="16" rx="3"/>
 <rect class="seg cur" x="984" y="292" width="200" height="16" rx="3"/>
 <text class="segl" x="780" y="304">v1 · M 2.07 · automatic</text>
-<text class="segl dark" x="992" y="304">v2 · M 1.32 · reviewed</text>
+<text class="segl on" x="992" y="304">v2 · M 1.32 · reviewed</text>
 <text class="tick" x="772" y="330">27.10 21:52</text>
 <text class="tick" x="984" y="330" text-anchor="middle">28.10 10:08</text>
 <text class="tick" x="1184" y="330" text-anchor="end">сейчас →</text>
-<text class="sub2" x="762" y="272">valid_from / valid_to — когда наш конвейер видел каждое состояние</text>
 <text class="colh" x="762" y="366">version_id</text>
 <text class="colh" x="842" y="366">valid_from</text>
 <text class="colh" x="930" y="366">valid_to</text>
@@ -314,22 +367,36 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col cur" x="930" y="404">NULL</text>
 <text class="col cur" x="1020" y="404">1.32</text>
 <text class="col cur" x="1060" y="404">reviewed</text>
-<text class="col cur" x="1132" y="404">true</text></svg></div><p>Главная таблица — <code>event_versions</code>. Когда USGS меняет магнитуду, статус, глубину или координаты, старая версия закрывается (заполняется <code>valid_to</code>), а новая открывается; у текущей <code>valid_to</code> пуст и <code>is_current = true</code>. Если поменялось только служебное поле <code>updated</code>, новой версии нет — это проверяет <code>row_hash</code>. База сама гарантирует одну текущую версию на событие (уникальный индекс) и непересекающиеся интервалы (<code>EXCLUDE USING gist</code>). Внизу — отметка обработанных строк STG, журнал загрузок и отбракованные записи с причиной.</p></section>
-<section class="card"><h2>Витрины (CDM): готовые таблицы для дашбордов</h2><div class="scroll"><svg viewBox="0 0 1232 720" role="img" aria-label="Витрины: карта событий, уточнения и история версий, журнал и качество, агрегаты по дням, по возрасту события и по часам наблюдения"><defs><marker id="arrow-cdm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker></defs><text class="zone" x="24" y="416">Агрегаты для графиков: посчитаны заранее, дашборд только суммирует</text>
+<text class="col cur" x="1132" y="404">true</text>
+</g></svg></div><figcaption>Главная таблица — <code>event_versions</code>: у каждой версии интервал <code>[valid_from, valid_to)</code>, у текущей <code>valid_to</code> пуст и <code>is_current = true</code>. База сама гарантирует одну текущую версию на событие (уникальный индекс) и непересекающиеся интервалы (<code>EXCLUDE USING gist</code>).</figcaption></figure><h3>Как строка STG становится новой версией</h3><figure><div class="scroll"><svg viewBox="0 0 1232 226" role="img" aria-label="Правила SCD2: устаревшую строку пропускаем, неизменённую не трогаем, изменённая закрывает текущую версию и открывает новую в одной транзакции"><polyline class="edge" points="214,66 264,66" marker-end="url(#arrow)"/>
+<polyline class="edge" points="474,66 524,66" marker-end="url(#arrow)"/><text class="yesno" x="499" y="58" text-anchor="middle">нет</text>
+<polyline class="edge" points="369,110 369,150" marker-end="url(#arrow)"/><text class="yesno" x="377" y="136" text-anchor="start">да</text>
+<polyline class="edge" points="734,66 784,66" marker-end="url(#arrow)"/><text class="yesno" x="759" y="58" text-anchor="middle">да</text>
+<polyline class="edge" points="629,110 629,150" marker-end="url(#arrow)"/><text class="yesno" x="637" y="136" text-anchor="start">нет</text>
+<g class="step in"><rect x="24" y="30" width="190" height="72" rx="6"/><text class="title" x="38" y="54">Строка из STG</text><text class="sub" x="38" y="74">новее watermark</text><text class="sub" x="38" y="91">по порядку id</text></g>
+<g class="step ask"><rect x="264" y="22" width="210" height="88" rx="8"/><text class="title" x="278" y="46">Устарела?</text><text class="sub" x="278" y="66">source_updated_at меньше,</text><text class="sub" x="278" y="83">чем у текущей версии</text></g>
+<g class="step ask"><rect x="524" y="22" width="210" height="88" rx="8"/><text class="title" x="538" y="46">Данные изменились?</text><text class="sub" x="538" y="66">row_hash отличается</text><text class="sub" x="538" y="83">от текущей версии</text></g>
+<g class="step skip"><rect x="264" y="150" width="210" height="62" rx="6"/><text class="title" x="278" y="174">Пропустить</text><text class="sub" x="278" y="194">backfill не откатывает назад</text></g>
+<g class="step skip"><rect x="524" y="150" width="210" height="62" rx="6"/><text class="title" x="538" y="174">Ничего не делать</text><text class="sub" x="538" y="194">поменялся только updated</text></g>
+<g class="step act"><rect x="784" y="14" width="424" height="120" rx="6"/><text class="title" x="798" y="38">Новая версия</text><text class="sub" x="798" y="58">1. закрыть текущую: valid_to = loaded_at</text><text class="sub" x="798" y="75">2. открыть новую: valid_from = loaded_at</text><text class="sub" x="798" y="92">3. сдвинуть watermark — одна транзакция</text><text class="sub" x="798" y="109">новое событие сразу получает версию 1</text></g></svg></div><figcaption>Строки обрабатываются по порядку. Устаревшая запись из backfill пропускается, повтор без изменений ничего не создаёт, изменение закрывает текущую версию и открывает новую. Версии, журнал и отметка обработанных строк записываются в одной транзакции: ошибка откатывает всё.</figcaption></figure></section>
+<section class="card" id="cdm"><header><h2><small>Раздел 4 · роль 3</small>Витрины (CDM): готовые таблицы для дашбордов</h2></header><figure><div class="scroll"><svg class="graph" viewBox="0 0 1232 724" role="img" aria-label="Витрины: карта событий связана с уточнениями и историей версий; рядом журнал и качество; ниже агрегаты по дням, по возрасту события и по часам наблюдения"><text class="zone" x="24" y="14">Одна строка на землетрясение или версию</text>
 <line class="divider" x1="24" y1="400" x2="1208" y2="400"/>
-<text class="zone" x="24" y="14">Одна строка на землетрясение или версию</text>
-<polyline class="edge" points="274,95 360,95" marker-end="url(#arrow-cdm)"/>
+<text class="zone" x="24" y="420">Агрегаты для графиков · посчитаны заранее, дашборд только суммирует</text>
+<g class="link" data-a="event_map" data-b="revision_summary">
+<polyline class="edge" points="274,95 360,95" marker-end="url(#arrow)"/>
 <text class="cardi" x="286" y="108" text-anchor="middle">1</text>
 <text class="cardi" x="348" y="108" text-anchor="middle">1</text>
 <text class="elabel" x="317" y="88" text-anchor="middle">event_id</text>
-<polyline class="edge" points="149,50 149,36 820,36 820,50" marker-end="url(#arrow-cdm)"/>
+</g>
+<g class="link" data-a="event_map" data-b="event_history">
+<polyline class="edge" points="149,50 149,36 820,36 820,50" marker-end="url(#arrow)"/>
 <text class="cardi" x="139" y="44" text-anchor="middle">1</text>
 <text class="cardi" x="810" y="44" text-anchor="middle">N</text>
 <text class="elabel" x="484" y="31" text-anchor="middle">event_id</text>
-<g class="tbl mart">
+</g>
+<g class="tbl mart" data-id="event_map" tabindex="0" aria-label="Таблица event_map">
 <rect class="body" x="24" y="50" width="250" height="287" rx="6"/>
-<rect class="head" x="24" y="50" width="250" height="30" rx="6"/>
-<rect class="head" x="24" y="72" width="250" height="8"/>
+<path class="head" d="M24,80 V56 a6,6 0 0 1 6,-6 H268 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="36" y="70">event_map</text>
 <text class="mark pk" x="36" y="95">PK</text>
 <text class="col" x="66" y="95">event_id</text>
@@ -346,10 +413,9 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="66" y="304">first_observed_at</text>
 <text class="note" x="36" y="323">строк: 33 032 — карта, таблицы</text>
 </g>
-<g class="tbl mart">
+<g class="tbl mart" data-id="revision_summary" tabindex="0" aria-label="Таблица revision_summary">
 <rect class="body" x="360" y="50" width="270" height="249" rx="6"/>
-<rect class="head" x="360" y="50" width="270" height="30" rx="6"/>
-<rect class="head" x="360" y="72" width="270" height="8"/>
+<path class="head" d="M360,80 V56 a6,6 0 0 1 6,-6 H624 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="372" y="70">revision_summary</text>
 <text class="mark pk" x="372" y="95">PK</text>
 <text class="col" x="402" y="95">event_id → event_map</text>
@@ -364,10 +430,9 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="402" y="266">last_changed_at</text>
 <text class="note" x="372" y="285">строк: 33 032 · уточнено: 58</text>
 </g>
-<g class="tbl mart">
+<g class="tbl mart" data-id="event_history" tabindex="0" aria-label="Таблица event_history">
 <rect class="body" x="690" y="50" width="260" height="230" rx="6"/>
-<rect class="head" x="690" y="50" width="260" height="30" rx="6"/>
-<rect class="head" x="690" y="72" width="260" height="8"/>
+<path class="head" d="M690,80 V56 a6,6 0 0 1 6,-6 H944 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="702" y="70">event_history</text>
 <text class="mark pk" x="702" y="95">PK</text>
 <text class="col" x="732" y="95">event_id → event_map</text>
@@ -382,10 +447,9 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="732" y="247">depth_km</text>
 <text class="note" x="702" y="266">строк: 33 090 — все версии</text>
 </g>
-<g class="tbl mart">
+<g class="tbl mart" data-id="pipeline_health" tabindex="0" aria-label="Таблица pipeline_health">
 <rect class="body" x="990" y="50" width="218" height="173" rx="6"/>
-<rect class="head" x="990" y="50" width="218" height="30" rx="6"/>
-<rect class="head" x="990" y="72" width="218" height="8"/>
+<path class="head" d="M990,80 V56 a6,6 0 0 1 6,-6 H1202 a6,6 0 0 1 6,6 V80 Z"/>
 <text class="title" x="1002" y="70">pipeline_health</text>
 <text class="mark pk" x="1002" y="95">PK</text>
 <text class="col" x="1032" y="95">load_id</text>
@@ -396,10 +460,9 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="1032" y="190">versions_inserted / closed</text>
 <text class="note" x="1002" y="209">строк: 7</text>
 </g>
-<g class="tbl mart">
+<g class="tbl mart" data-id="data_quality" tabindex="0" aria-label="Таблица data_quality">
 <rect class="body" x="990" y="240" width="218" height="135" rx="6"/>
-<rect class="head" x="990" y="240" width="218" height="30" rx="6"/>
-<rect class="head" x="990" y="262" width="218" height="8"/>
+<path class="head" d="M990,270 V246 a6,6 0 0 1 6,-6 H1202 a6,6 0 0 1 6,6 V270 Z"/>
 <text class="title" x="1002" y="260">data_quality</text>
 <text class="mark pk" x="1002" y="285">PK</text>
 <text class="col" x="1032" y="285">check_group</text>
@@ -409,117 +472,185 @@ svg .tickline { stroke: var(--card-border); stroke-width: 1; stroke-dasharray: 2
 <text class="col" x="1032" y="342">share</text>
 <text class="note" x="1002" y="361">строк: 11</text>
 </g>
-<g class="tbl mart">
-<rect class="body" x="24" y="430" width="300" height="268" rx="6"/>
-<rect class="head" x="24" y="430" width="300" height="30" rx="6"/>
-<rect class="head" x="24" y="452" width="300" height="8"/>
-<text class="title" x="36" y="450">daily_activity</text>
-<text class="mark pk" x="36" y="475">PK</text>
-<text class="col" x="66" y="475">event_date</text>
-<text class="mark pk" x="36" y="494">PK</text>
-<text class="col" x="66" y="494">network_code</text>
-<text class="mark pk" x="36" y="513">PK</text>
-<text class="col" x="66" y="513">mag_bin (шаг 0,5)</text>
-<text class="mark pk" x="36" y="532">PK</text>
-<text class="col" x="66" y="532">depth_class</text>
-<text class="col" x="66" y="551">mag_class</text>
-<text class="col" x="66" y="570">events_cnt, reviewed_cnt</text>
-<text class="col" x="66" y="589">automatic_cnt, deleted_cnt</text>
-<text class="col" x="66" y="608">mag / depth / place_filled_cnt</text>
-<text class="col" x="66" y="627">revised_cnt, tsunami_flag_cnt</text>
-<text class="col" x="66" y="646">sum_mag, max_mag</text>
-<text class="col" x="66" y="665">sum_depth_km, max_depth_km</text>
-<text class="note" x="36" y="684">строк: 6 170 — день × сеть × M × глубина</text>
+<g class="tbl mart" data-id="daily_activity" tabindex="0" aria-label="Таблица daily_activity">
+<rect class="body" x="24" y="434" width="300" height="268" rx="6"/>
+<path class="head" d="M24,464 V440 a6,6 0 0 1 6,-6 H318 a6,6 0 0 1 6,6 V464 Z"/>
+<text class="title" x="36" y="454">daily_activity</text>
+<text class="mark pk" x="36" y="479">PK</text>
+<text class="col" x="66" y="479">event_date</text>
+<text class="mark pk" x="36" y="498">PK</text>
+<text class="col" x="66" y="498">network_code</text>
+<text class="mark pk" x="36" y="517">PK</text>
+<text class="col" x="66" y="517">mag_bin (шаг 0,5)</text>
+<text class="mark pk" x="36" y="536">PK</text>
+<text class="col" x="66" y="536">depth_class</text>
+<text class="col" x="66" y="555">mag_class</text>
+<text class="col" x="66" y="574">events_cnt, reviewed_cnt</text>
+<text class="col" x="66" y="593">automatic_cnt, deleted_cnt</text>
+<text class="col" x="66" y="612">mag / depth / place_filled_cnt</text>
+<text class="col" x="66" y="631">revised_cnt, tsunami_flag_cnt</text>
+<text class="col" x="66" y="650">sum_mag, max_mag</text>
+<text class="col" x="66" y="669">sum_depth_km, max_depth_km</text>
+<text class="note" x="36" y="688">строк: 6 170 — день × сеть × M × глубина</text>
 </g>
-<g class="tbl mart">
-<rect class="body" x="360" y="430" width="270" height="192" rx="6"/>
-<rect class="head" x="360" y="430" width="270" height="30" rx="6"/>
-<rect class="head" x="360" y="452" width="270" height="8"/>
-<text class="title" x="372" y="450">review_summary</text>
-<text class="mark pk" x="372" y="475">PK</text>
-<text class="col" x="402" y="475">network_code</text>
-<text class="mark pk" x="372" y="494">PK</text>
-<text class="col" x="402" y="494">event_age_days</text>
-<text class="mark pk" x="372" y="513">PK</text>
-<text class="col" x="402" y="513">mag_class</text>
-<text class="col" x="402" y="532">events_cnt, reviewed_cnt</text>
-<text class="col" x="402" y="551">automatic_cnt, deleted_cnt</text>
-<text class="col" x="402" y="570">reviewed_share</text>
-<text class="col" x="402" y="589">data_as_of</text>
-<text class="note" x="372" y="608">строк: 2 007 — проверка по возрасту</text>
+<g class="tbl mart" data-id="review_summary" tabindex="0" aria-label="Таблица review_summary">
+<rect class="body" x="360" y="434" width="270" height="192" rx="6"/>
+<path class="head" d="M360,464 V440 a6,6 0 0 1 6,-6 H624 a6,6 0 0 1 6,6 V464 Z"/>
+<text class="title" x="372" y="454">review_summary</text>
+<text class="mark pk" x="372" y="479">PK</text>
+<text class="col" x="402" y="479">network_code</text>
+<text class="mark pk" x="372" y="498">PK</text>
+<text class="col" x="402" y="498">event_age_days</text>
+<text class="mark pk" x="372" y="517">PK</text>
+<text class="col" x="402" y="517">mag_class</text>
+<text class="col" x="402" y="536">events_cnt, reviewed_cnt</text>
+<text class="col" x="402" y="555">automatic_cnt, deleted_cnt</text>
+<text class="col" x="402" y="574">reviewed_share</text>
+<text class="col" x="402" y="593">data_as_of</text>
+<text class="note" x="372" y="612">строк: 2 007 — проверка по возрасту</text>
 </g>
-<g class="tbl mart">
-<rect class="body" x="690" y="430" width="260" height="173" rx="6"/>
-<rect class="head" x="690" y="430" width="260" height="30" rx="6"/>
-<rect class="head" x="690" y="452" width="260" height="8"/>
-<text class="title" x="702" y="450">review_dynamics</text>
-<text class="mark pk" x="702" y="475">PK</text>
-<text class="col" x="732" y="475">snapshot_at (каждый час)</text>
-<text class="mark pk" x="702" y="494">PK</text>
-<text class="col" x="732" y="494">network_code</text>
-<text class="mark pk" x="702" y="513">PK</text>
-<text class="col" x="732" y="513">mag_class</text>
-<text class="col" x="732" y="532">events_cnt, reviewed_cnt</text>
-<text class="col" x="732" y="551">automatic_cnt</text>
-<text class="col" x="732" y="570">mag_filled_cnt, sum_mag</text>
-<text class="note" x="702" y="589">строк: 560 — 14 часовых срезов</text>
-</g></svg></div><p>Верхний ряд — одна строка на землетрясение: <code>event_map</code> для карты и таблиц, <code>revision_summary</code> — первая и текущая версия, <code>event_history</code> — вся цепочка версий для дашборда «История события». Нижний ряд — заранее посчитанные агрегаты: по дням, по возрасту события и по часам наблюдения (машина времени по SCD2). Счётчики считаются только по текущим версиям и только для <code>earthquake</code>; пустая магнитуда — отдельный класс «нет данных». Все витрины пересобираются целиком в одной транзакции: повторный запуск даёт то же самое, ошибка оставляет прежние данные.</p></section>
-<section class="card"><h2>Как детальный слой питает витрины</h2><div class="scroll"><svg viewBox="0 0 1184 500" role="img" aria-label="Из каких таблиц детального слоя строится каждая витрина"><defs><marker id="arrow-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker></defs><path class="edge" d="M324,52 C592.0,52 592.0,52 860,52" marker-end="url(#arrow-flow)"/>
-<path class="edge" d="M324,52 C592.0,52 592.0,112 860,112" marker-end="url(#arrow-flow)"/>
-<rect class="labelbg" x="513.4" y="73.0" width="157.2" height="16" rx="3"/><text class="elabel" x="592.0" y="85.0" text-anchor="middle">GROUP BY день, сеть, M</text>
-<path class="edge" d="M324,52 C592.0,52 592.0,172 860,172" marker-end="url(#arrow-flow)"/>
-<path class="edge" d="M324,52 C592.0,52 592.0,232 860,232" marker-end="url(#arrow-flow)"/>
-<path class="edge" d="M324,52 C592.0,52 592.0,472 860,472" marker-end="url(#arrow-flow)"/>
-<path class="edge" d="M324,162 C592.0,162 592.0,232 860,232" marker-end="url(#arrow-flow)"/>
-<rect class="labelbg" x="543.1" y="188.0" width="97.8" height="16" rx="3"/><text class="elabel" x="592.0" y="200.0" text-anchor="middle">первая версия</text>
-<path class="edge" d="M324,162 C592.0,162 592.0,292 860,292" marker-end="url(#arrow-flow)"/>
-<path class="edge" d="M324,162 C592.0,162 592.0,352 860,352" marker-end="url(#arrow-flow)"/>
-<rect class="labelbg" x="496.9" y="248.0" width="190.2" height="16" rx="3"/><text class="elabel" x="592.0" y="260.0" text-anchor="middle">valid_from ≤ час &lt; valid_to</text>
-<path class="edge" d="M324,272 C592.0,272 592.0,52 860,52" marker-end="url(#arrow-flow)"/>
-<path class="edge" d="M324,352 C592.0,352 592.0,412 860,412" marker-end="url(#arrow-flow)"/>
-<path class="edge" d="M324,432 C592.0,432 592.0,472 860,472" marker-end="url(#arrow-flow)"/>
-<g class="node src"><rect x="24" y="30" width="300" height="44" rx="6"/><text class="title" x="36" y="49">dds.event_versions — is_current</text><text class="sub" x="36" y="66">текущие землетрясения</text></g>
-<g class="node src"><rect x="24" y="140" width="300" height="44" rx="6"/><text class="title" x="36" y="159">dds.event_versions — все версии</text><text class="sub" x="36" y="176">история SCD2</text></g>
-<g class="node src"><rect x="24" y="250" width="300" height="44" rx="6"/><text class="title" x="36" y="269">dds.events</text><text class="sub" x="36" y="286">первое наблюдение события</text></g>
-<g class="node src"><rect x="24" y="330" width="300" height="44" rx="6"/><text class="title" x="36" y="349">dds.load_log</text><text class="sub" x="36" y="366">журнал загрузок</text></g>
-<g class="node src"><rect x="24" y="410" width="300" height="44" rx="6"/><text class="title" x="36" y="429">dds.rejected_observations</text><text class="sub" x="36" y="446">отбраковка с причиной</text></g>
-<g class="node dst"><rect x="860" y="30" width="300" height="44" rx="6"/><text class="title" x="872" y="49">cdm.event_map</text><text class="sub" x="872" y="66">карта и таблицы</text></g>
-<g class="node dst"><rect x="860" y="90" width="300" height="44" rx="6"/><text class="title" x="872" y="109">cdm.daily_activity</text><text class="sub" x="872" y="126">графики по дням</text></g>
-<g class="node dst"><rect x="860" y="150" width="300" height="44" rx="6"/><text class="title" x="872" y="169">cdm.review_summary</text><text class="sub" x="872" y="186">проверка по возрасту</text></g>
-<g class="node dst"><rect x="860" y="210" width="300" height="44" rx="6"/><text class="title" x="872" y="229">cdm.revision_summary</text><text class="sub" x="872" y="246">первая vs текущая</text></g>
-<g class="node dst"><rect x="860" y="270" width="300" height="44" rx="6"/><text class="title" x="872" y="289">cdm.event_history</text><text class="sub" x="872" y="306">цепочка версий</text></g>
-<g class="node dst"><rect x="860" y="330" width="300" height="44" rx="6"/><text class="title" x="872" y="349">cdm.review_dynamics</text><text class="sub" x="872" y="366">срезы по часам</text></g>
-<g class="node dst"><rect x="860" y="390" width="300" height="44" rx="6"/><text class="title" x="872" y="409">cdm.pipeline_health</text><text class="sub" x="872" y="426">запуски конвейера</text></g>
-<g class="node dst"><rect x="860" y="450" width="300" height="44" rx="6"/><text class="title" x="872" y="469">cdm.data_quality</text><text class="sub" x="872" y="486">качество данных</text></g>
-<text class="zone" x="24" y="18">Детальный слой (роль 2)</text>
-<text class="zone" x="860" y="18">Витрины (роль 3)</text></svg></div><p>Загрузчик витрин <code>sql/cdm_load.sql</code> читает только схему <code>dds</code> — в сырые данные он не заглядывает, это проверяет автотест. Текущие версии дают счётчики и карту, все версии — уточнения, историю и часовые срезы.</p></section>
-<section class="card"><h2>Как витрины питают дашборды</h2><div class="scroll"><svg viewBox="0 0 1184 460" role="img" aria-label="Какие витрины питают какие вкладки дашбордов Metabase"><defs><marker id="arrow-dash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrowhead"/></marker></defs><path class="edge" d="M324,50 C592.0,50 592.0,62 860,62" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,50 C592.0,50 592.0,144 860,144" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,102 C592.0,102 592.0,62 860,62" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,102 C592.0,102 592.0,144 860,144" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,154 C592.0,154 592.0,144 860,144" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,206 C592.0,206 592.0,144 860,144" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,258 C592.0,258 592.0,226 860,226" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,258 C592.0,258 592.0,390 860,390" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,310 C592.0,310 592.0,390 860,390" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,362 C592.0,362 592.0,62 860,62" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,362 C592.0,362 592.0,308 860,308" marker-end="url(#arrow-dash)"/>
-<path class="edge" d="M324,414 C592.0,414 592.0,308 860,308" marker-end="url(#arrow-dash)"/>
-<g class="node dst"><rect x="24" y="30" width="300" height="40" rx="6"/><text class="title" x="36" y="55">cdm.event_map</text></g>
-<g class="node dst"><rect x="24" y="82" width="300" height="40" rx="6"/><text class="title" x="36" y="107">cdm.daily_activity</text></g>
-<g class="node dst"><rect x="24" y="134" width="300" height="40" rx="6"/><text class="title" x="36" y="159">cdm.review_summary</text></g>
-<g class="node dst"><rect x="24" y="186" width="300" height="40" rx="6"/><text class="title" x="36" y="211">cdm.review_dynamics</text></g>
-<g class="node dst"><rect x="24" y="238" width="300" height="40" rx="6"/><text class="title" x="36" y="263">cdm.revision_summary</text></g>
-<g class="node dst"><rect x="24" y="290" width="300" height="40" rx="6"/><text class="title" x="36" y="315">cdm.event_history</text></g>
-<g class="node dst"><rect x="24" y="342" width="300" height="40" rx="6"/><text class="title" x="36" y="367">cdm.pipeline_health</text></g>
-<g class="node dst"><rect x="24" y="394" width="300" height="40" rx="6"/><text class="title" x="36" y="419">cdm.data_quality</text></g>
-<g class="node mb"><rect x="860" y="40" width="300" height="44" rx="6"/><text class="title" x="872" y="59">Обзор</text><text class="sub" x="872" y="76">KPI, 2 карты, по дням, Гутенберг–Рихтер</text></g>
-<g class="node mb"><rect x="860" y="122" width="300" height="44" rx="6"/><text class="title" x="872" y="141">Проверка USGS</text><text class="sub" x="872" y="158">доля reviewed, сети, возраст, SCD2 по часам</text></g>
-<g class="node mb"><rect x="860" y="204" width="300" height="44" rx="6"/><text class="title" x="872" y="223">Уточнения (SCD2)</text><text class="sub" x="872" y="240">что и насколько уточнилось</text></g>
-<g class="node mb"><rect x="860" y="286" width="300" height="44" rx="6"/><text class="title" x="872" y="305">Качество и конвейер</text><text class="sub" x="872" y="322">отбраковка, типы, журнал</text></g>
-<g class="node mb"><rect x="860" y="368" width="300" height="44" rx="6"/><text class="title" x="872" y="387">История события</text><text class="sub" x="872" y="404">все версии одного события</text></g>
+<g class="tbl mart" data-id="review_dynamics" tabindex="0" aria-label="Таблица review_dynamics">
+<rect class="body" x="690" y="434" width="260" height="173" rx="6"/>
+<path class="head" d="M690,464 V440 a6,6 0 0 1 6,-6 H944 a6,6 0 0 1 6,6 V464 Z"/>
+<text class="title" x="702" y="454">review_dynamics</text>
+<text class="mark pk" x="702" y="479">PK</text>
+<text class="col" x="732" y="479">snapshot_at (каждый час)</text>
+<text class="mark pk" x="702" y="498">PK</text>
+<text class="col" x="732" y="498">network_code</text>
+<text class="mark pk" x="702" y="517">PK</text>
+<text class="col" x="732" y="517">mag_class</text>
+<text class="col" x="732" y="536">events_cnt, reviewed_cnt</text>
+<text class="col" x="732" y="555">automatic_cnt</text>
+<text class="col" x="732" y="574">mag_filled_cnt, sum_mag</text>
+<text class="note" x="702" y="593">строк: 560 — 14 часовых срезов</text>
+</g></svg></div><figcaption>Верхний ряд — строка на землетрясение или версию: <code>event_map</code> для карты, <code>revision_summary</code> — первая и текущая версия, <code>event_history</code> — вся цепочка. Нижний ряд — агрегаты по дням, по возрасту события и по часам наблюдения (машина времени по SCD2). Счётчики — только текущие версии и только <code>earthquake</code>; пустая магнитуда — класс «нет данных». Витрины пересобираются целиком в одной транзакции.</figcaption></figure></section>
+<section class="card" id="flow"><header><h2><small>Раздел 5</small>Как детальный слой питает витрины</h2></header><figure><div class="scroll"><svg class="graph" viewBox="0 0 1184 500" role="img" aria-label="Из каких таблиц детального слоя строится каждая витрина"><g class="link" data-a="s_cur" data-b="event_map">
+<path class="edge" d="M324,52 C592.0,52 592.0,52 860,52" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="s_cur" data-b="daily_activity">
+<path class="edge" d="M324,52 C592.0,52 592.0,112 860,112" marker-end="url(#arrow)"/>
+<rect class="labelbg" x="515.6" y="73.0" width="152.8" height="16" rx="3"/><text class="elabel" x="592.0" y="85.0" text-anchor="middle">GROUP BY день, сеть, M</text>
+</g>
+<g class="link" data-a="s_cur" data-b="review_summary">
+<path class="edge" d="M324,52 C592.0,52 592.0,172 860,172" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="s_cur" data-b="revision_summary">
+<path class="edge" d="M324,52 C592.0,52 592.0,232 860,232" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="s_cur" data-b="data_quality">
+<path class="edge" d="M324,52 C592.0,52 592.0,472 860,472" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="s_all" data-b="revision_summary">
+<path class="edge" d="M324,162 C592.0,162 592.0,232 860,232" marker-end="url(#arrow)"/>
+<rect class="labelbg" x="544.4" y="188.0" width="95.2" height="16" rx="3"/><text class="elabel" x="592.0" y="200.0" text-anchor="middle">первая версия</text>
+</g>
+<g class="link" data-a="s_all" data-b="event_history">
+<path class="edge" d="M324,162 C592.0,162 592.0,292 860,292" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="s_all" data-b="review_dynamics">
+<path class="edge" d="M324,162 C592.0,162 592.0,352 860,352" marker-end="url(#arrow)"/>
+<rect class="labelbg" x="499.6" y="248.0" width="184.8" height="16" rx="3"/><text class="elabel" x="592.0" y="260.0" text-anchor="middle">valid_from ≤ час &lt; valid_to</text>
+</g>
+<g class="link" data-a="s_events" data-b="event_map">
+<path class="edge" d="M324,272 C592.0,272 592.0,52 860,52" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="s_log" data-b="pipeline_health">
+<path class="edge" d="M324,352 C592.0,352 592.0,412 860,412" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="s_rej" data-b="data_quality">
+<path class="edge" d="M324,432 C592.0,432 592.0,472 860,472" marker-end="url(#arrow)"/>
+</g>
+<g class="node src" data-id="s_cur" tabindex="0" aria-label="dds.event_versions — is_current"><rect x="24" y="30" width="300" height="44" rx="6"/><text class="title" x="36" y="49">dds.event_versions — is_current</text><text class="sub" x="36" y="66">текущие землетрясения</text></g>
+<g class="node src" data-id="s_all" tabindex="0" aria-label="dds.event_versions — все версии"><rect x="24" y="140" width="300" height="44" rx="6"/><text class="title" x="36" y="159">dds.event_versions — все версии</text><text class="sub" x="36" y="176">история SCD2</text></g>
+<g class="node src" data-id="s_events" tabindex="0" aria-label="dds.events"><rect x="24" y="250" width="300" height="44" rx="6"/><text class="title" x="36" y="269">dds.events</text><text class="sub" x="36" y="286">первое наблюдение события</text></g>
+<g class="node src" data-id="s_log" tabindex="0" aria-label="dds.load_log"><rect x="24" y="330" width="300" height="44" rx="6"/><text class="title" x="36" y="349">dds.load_log</text><text class="sub" x="36" y="366">журнал загрузок</text></g>
+<g class="node src" data-id="s_rej" tabindex="0" aria-label="dds.rejected_observations"><rect x="24" y="410" width="300" height="44" rx="6"/><text class="title" x="36" y="429">dds.rejected_observations</text><text class="sub" x="36" y="446">отбраковка с причиной</text></g>
+<g class="node dst" data-id="event_map" tabindex="0" aria-label="cdm.event_map"><rect x="860" y="30" width="300" height="44" rx="6"/><text class="title" x="872" y="49">cdm.event_map</text><text class="sub" x="872" y="66">карта и таблицы</text></g>
+<g class="node dst" data-id="daily_activity" tabindex="0" aria-label="cdm.daily_activity"><rect x="860" y="90" width="300" height="44" rx="6"/><text class="title" x="872" y="109">cdm.daily_activity</text><text class="sub" x="872" y="126">графики по дням</text></g>
+<g class="node dst" data-id="review_summary" tabindex="0" aria-label="cdm.review_summary"><rect x="860" y="150" width="300" height="44" rx="6"/><text class="title" x="872" y="169">cdm.review_summary</text><text class="sub" x="872" y="186">проверка по возрасту</text></g>
+<g class="node dst" data-id="revision_summary" tabindex="0" aria-label="cdm.revision_summary"><rect x="860" y="210" width="300" height="44" rx="6"/><text class="title" x="872" y="229">cdm.revision_summary</text><text class="sub" x="872" y="246">первая против текущей</text></g>
+<g class="node dst" data-id="event_history" tabindex="0" aria-label="cdm.event_history"><rect x="860" y="270" width="300" height="44" rx="6"/><text class="title" x="872" y="289">cdm.event_history</text><text class="sub" x="872" y="306">цепочка версий</text></g>
+<g class="node dst" data-id="review_dynamics" tabindex="0" aria-label="cdm.review_dynamics"><rect x="860" y="330" width="300" height="44" rx="6"/><text class="title" x="872" y="349">cdm.review_dynamics</text><text class="sub" x="872" y="366">срезы по часам</text></g>
+<g class="node dst" data-id="pipeline_health" tabindex="0" aria-label="cdm.pipeline_health"><rect x="860" y="390" width="300" height="44" rx="6"/><text class="title" x="872" y="409">cdm.pipeline_health</text><text class="sub" x="872" y="426">запуски конвейера</text></g>
+<g class="node dst" data-id="data_quality" tabindex="0" aria-label="cdm.data_quality"><rect x="860" y="450" width="300" height="44" rx="6"/><text class="title" x="872" y="469">cdm.data_quality</text><text class="sub" x="872" y="486">качество данных</text></g>
+<text class="zone" x="24" y="18">Детальный слой · роль 2</text>
+<text class="zone" x="860" y="18">Витрины · роль 3</text></svg></div><figcaption>Загрузчик <code>sql/cdm_load.sql</code> читает только схему <code>dds</code>, в сырые данные не заглядывает — это проверяет автотест. Текущие версии дают счётчики и карту, все версии — уточнения, историю и часовые срезы.</figcaption></figure></section>
+<section class="card" id="dash"><header><h2><small>Раздел 6</small>Как витрины питают дашборды</h2></header><figure><div class="scroll"><svg class="graph" viewBox="0 0 1184 460" role="img" aria-label="Какие витрины питают какие вкладки дашбордов Metabase"><g class="link" data-a="event_map" data-b="t1">
+<path class="edge" d="M324,50 C592.0,50 592.0,62 860,62" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="event_map" data-b="t2">
+<path class="edge" d="M324,50 C592.0,50 592.0,144 860,144" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="daily_activity" data-b="t1">
+<path class="edge" d="M324,102 C592.0,102 592.0,62 860,62" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="daily_activity" data-b="t2">
+<path class="edge" d="M324,102 C592.0,102 592.0,144 860,144" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="review_summary" data-b="t2">
+<path class="edge" d="M324,154 C592.0,154 592.0,144 860,144" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="review_dynamics" data-b="t2">
+<path class="edge" d="M324,206 C592.0,206 592.0,144 860,144" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="revision_summary" data-b="t3">
+<path class="edge" d="M324,258 C592.0,258 592.0,226 860,226" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="revision_summary" data-b="t5">
+<path class="edge" d="M324,258 C592.0,258 592.0,390 860,390" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="event_history" data-b="t5">
+<path class="edge" d="M324,310 C592.0,310 592.0,390 860,390" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="pipeline_health" data-b="t1">
+<path class="edge" d="M324,362 C592.0,362 592.0,62 860,62" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="pipeline_health" data-b="t4">
+<path class="edge" d="M324,362 C592.0,362 592.0,308 860,308" marker-end="url(#arrow)"/>
+</g>
+<g class="link" data-a="data_quality" data-b="t4">
+<path class="edge" d="M324,414 C592.0,414 592.0,308 860,308" marker-end="url(#arrow)"/>
+</g>
+<g class="node dst" data-id="event_map" tabindex="0" aria-label="cdm.event_map"><rect x="24" y="30" width="300" height="40" rx="6"/><text class="title" x="36" y="54.0">cdm.event_map</text></g>
+<g class="node dst" data-id="daily_activity" tabindex="0" aria-label="cdm.daily_activity"><rect x="24" y="82" width="300" height="40" rx="6"/><text class="title" x="36" y="106.0">cdm.daily_activity</text></g>
+<g class="node dst" data-id="review_summary" tabindex="0" aria-label="cdm.review_summary"><rect x="24" y="134" width="300" height="40" rx="6"/><text class="title" x="36" y="158.0">cdm.review_summary</text></g>
+<g class="node dst" data-id="review_dynamics" tabindex="0" aria-label="cdm.review_dynamics"><rect x="24" y="186" width="300" height="40" rx="6"/><text class="title" x="36" y="210.0">cdm.review_dynamics</text></g>
+<g class="node dst" data-id="revision_summary" tabindex="0" aria-label="cdm.revision_summary"><rect x="24" y="238" width="300" height="40" rx="6"/><text class="title" x="36" y="262.0">cdm.revision_summary</text></g>
+<g class="node dst" data-id="event_history" tabindex="0" aria-label="cdm.event_history"><rect x="24" y="290" width="300" height="40" rx="6"/><text class="title" x="36" y="314.0">cdm.event_history</text></g>
+<g class="node dst" data-id="pipeline_health" tabindex="0" aria-label="cdm.pipeline_health"><rect x="24" y="342" width="300" height="40" rx="6"/><text class="title" x="36" y="366.0">cdm.pipeline_health</text></g>
+<g class="node dst" data-id="data_quality" tabindex="0" aria-label="cdm.data_quality"><rect x="24" y="394" width="300" height="40" rx="6"/><text class="title" x="36" y="418.0">cdm.data_quality</text></g>
+<g class="node mb" data-id="t1" tabindex="0" aria-label="Обзор"><rect x="860" y="40" width="300" height="44" rx="6"/><text class="title" x="872" y="59">Обзор</text><text class="sub" x="872" y="76">KPI, 2 карты, по дням, Гутенберг–Рихтер</text></g>
+<g class="node mb" data-id="t2" tabindex="0" aria-label="Проверка USGS"><rect x="860" y="122" width="300" height="44" rx="6"/><text class="title" x="872" y="141">Проверка USGS</text><text class="sub" x="872" y="158">доля reviewed, сети, возраст, SCD2 по часам</text></g>
+<g class="node mb" data-id="t3" tabindex="0" aria-label="Уточнения (SCD2)"><rect x="860" y="204" width="300" height="44" rx="6"/><text class="title" x="872" y="223">Уточнения (SCD2)</text><text class="sub" x="872" y="240">что и насколько уточнилось</text></g>
+<g class="node mb" data-id="t4" tabindex="0" aria-label="Качество и конвейер"><rect x="860" y="286" width="300" height="44" rx="6"/><text class="title" x="872" y="305">Качество и конвейер</text><text class="sub" x="872" y="322">отбраковка, типы, журнал</text></g>
+<g class="node mb" data-id="t5" tabindex="0" aria-label="История события"><rect x="860" y="368" width="300" height="44" rx="6"/><text class="title" x="872" y="387">История события</text><text class="sub" x="872" y="404">все версии одного события</text></g>
 <text class="zone" x="24" y="18">Витрины CDM</text>
-<text class="zone" x="860" y="18">Вкладки дашбордов Metabase</text></svg></div><p>Дашборды собираются скриптом <code>scripts/setup_metabase.py</code>: 30 карточек, 4 вкладки основного дашборда и отдельный дашборд истории события. Фильтры дата, магнитуда, сеть и глубина действуют на все вкладки; клик по <code>event_id</code> открывает историю версий.</p></section>
-</main>
+<text class="zone" x="860" y="18">Вкладки дашбордов Metabase</text></svg></div><figcaption>Дашборды собирает скрипт <code>scripts/setup_metabase.py</code>: 30 карточек, 4 вкладки и отдельный дашборд истории события. Фильтры дата, магнитуда, сеть и глубина работают на всех вкладках; клик по <code>event_id</code> открывает историю версий.</figcaption></figure></section>
+<p class="hint">Числа — снимок рабочей загрузки на 28.10.2026 10:08 UTC; конвейер продолжает работать каждый час.</p>
+</div>
+<script>
+document.querySelectorAll('svg.graph').forEach(svg => {
+  const links = [...svg.querySelectorAll('.link')];
+  const items = [...svg.querySelectorAll('[data-id]')];
+  const byId = id => items.filter(el => el.dataset.id === id);
+  const show = id => {
+    svg.classList.add('dim');
+    byId(id).forEach(el => el.classList.add('on'));
+    links.forEach(l => {
+      if (l.dataset.a === id || l.dataset.b === id) {
+        l.classList.add('on');
+        byId(l.dataset.a === id ? l.dataset.b : l.dataset.a).forEach(el => el.classList.add('on'));
+      }
+    });
+  };
+  const clear = () => { svg.classList.remove('dim'); svg.querySelectorAll('.on').forEach(el => el.classList.remove('on')); };
+  items.forEach(el => {
+    el.addEventListener('pointerenter', () => { clear(); show(el.dataset.id); });
+    el.addEventListener('pointerleave', clear);
+    el.addEventListener('focus', () => { clear(); show(el.dataset.id); });
+    el.addEventListener('blur', clear);
+  });
+});
+</script>
 </body>
 </html>
